@@ -1,0 +1,109 @@
+name: Build Gabbermaster Clone
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup JUCE
+      run: |
+        if [ ! -f "JUCE/CMakeLists.txt" ]; then
+          echo "JUCE not found, cloning..."
+          rm -rf JUCE
+          git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git JUCE
+        else
+          echo "JUCE already present"
+        fi
+
+    - name: Configure CMake (Universal Binary)
+      run: |
+        cd GabbermasterClone
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+
+    - name: Build
+      run: |
+        cd GabbermasterClone
+        cmake --build build --config Release
+
+    - name: Create macOS package
+      run: |
+        mkdir -p package/macOS
+        cp -R GabbermasterClone/build/GabbermasterClone_artefacts/Release/VST3/* package/macOS/ 2>/dev/null || true
+        cp -R GabbermasterClone/build/GabbermasterClone_artefacts/Release/AU/* package/macOS/ 2>/dev/null || true
+        cp -R GabbermasterClone/build/GabbermasterClone_artefacts/Release/Standalone/* package/macOS/ 2>/dev/null || true
+        echo "Gabbermaster Clone - macOS Installation" > package/macOS/INSTALL.txt
+        echo "=======================================" >> package/macOS/INSTALL.txt
+        echo "" >> package/macOS/INSTALL.txt
+        echo "VST3 Plugin (for Ableton Live):" >> package/macOS/INSTALL.txt
+        echo "Copy Gabbermaster Clone.vst3 to ~/Library/Audio/Plug-Ins/VST3/" >> package/macOS/INSTALL.txt
+        echo "" >> package/macOS/INSTALL.txt
+        echo "AU Plugin (for Logic Pro):" >> package/macOS/INSTALL.txt
+        echo "Copy Gabbermaster Clone.component to ~/Library/Audio/Plug-Ins/Components/" >> package/macOS/INSTALL.txt
+        echo "" >> package/macOS/INSTALL.txt
+        echo "If macOS blocks the plugin, run in Terminal:" >> package/macOS/INSTALL.txt
+        echo "xattr -cr ~/Library/Audio/Plug-Ins/VST3/Gabbermaster\\ Clone.vst3" >> package/macOS/INSTALL.txt
+        echo "xattr -cr ~/Library/Audio/Plug-Ins/Components/Gabbermaster\\ Clone.component" >> package/macOS/INSTALL.txt
+        echo "" >> package/macOS/INSTALL.txt
+        echo "Then restart your DAW and rescan plugins." >> package/macOS/INSTALL.txt
+        ls -la package/macOS/
+
+    - name: Upload macOS Plugins
+      uses: actions/upload-artifact@v4
+      with:
+        name: Gabbermaster-Clone-macOS
+        path: package/macOS/
+        if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup JUCE
+      shell: pwsh
+      run: |
+        if (!(Test-Path "JUCE/CMakeLists.txt")) {
+          Write-Host "JUCE not found, cloning..."
+          if (Test-Path "JUCE") { Remove-Item -Recurse -Force "JUCE" }
+          git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git JUCE
+        } else {
+          Write-Host "JUCE already present"
+        }
+
+    - name: Configure CMake
+      run: |
+        cd GabbermasterClone
+        cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: |
+        cd GabbermasterClone
+        cmake --build build --config Release
+
+    - name: Create Windows package
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "package/Windows"
+        Copy-Item -Path "GabbermasterClone/build/GabbermasterClone_artefacts/Release/VST3/*" -Destination "package/Windows/" -Recurse -ErrorAction SilentlyContinue
+        Copy-Item -Path "GabbermasterClone/build/GabbermasterClone_artefacts/Release/Standalone/*" -Destination "package/Windows/" -Recurse -ErrorAction SilentlyContinue
+        Set-Content -Path "package/Windows/INSTALL.txt" -Value "Gabbermaster Clone - Windows Installation`n`nVST3: Copy Gabbermaster Clone.vst3 folder to C:\Program Files\Common Files\VST3\`n`nThen restart your DAW and rescan plugins."
+        Get-ChildItem -Recurse package/Windows/
+
+    - name: Upload Windows Plugins
+      uses: actions/upload-artifact@v4
+      with:
+        name: Gabbermaster-Clone-Windows
+        path: package/Windows/
+        if-no-files-found: error
