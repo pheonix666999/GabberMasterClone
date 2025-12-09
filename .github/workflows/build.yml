@@ -35,6 +35,26 @@ jobs:
         cd GabbermasterClone
         cmake --build build --config Release
 
+    - name: Codesign plugins (ad-hoc)
+      run: |
+        # Ad-hoc sign the VST3
+        if [ -d "GabbermasterClone/build/GabbermasterClone_artefacts/Release/VST3/Gabbermaster Clone.vst3" ]; then
+          codesign --force --deep --sign - "GabbermasterClone/build/GabbermasterClone_artefacts/Release/VST3/Gabbermaster Clone.vst3"
+          echo "VST3 signed successfully"
+        fi
+
+        # Ad-hoc sign the AU
+        if [ -d "GabbermasterClone/build/GabbermasterClone_artefacts/Release/AU/Gabbermaster Clone.component" ]; then
+          codesign --force --deep --sign - "GabbermasterClone/build/GabbermasterClone_artefacts/Release/AU/Gabbermaster Clone.component"
+          echo "AU signed successfully"
+        fi
+
+        # Ad-hoc sign the Standalone
+        if [ -d "GabbermasterClone/build/GabbermasterClone_artefacts/Release/Standalone/Gabbermaster Clone.app" ]; then
+          codesign --force --deep --sign - "GabbermasterClone/build/GabbermasterClone_artefacts/Release/Standalone/Gabbermaster Clone.app"
+          echo "Standalone signed successfully"
+        fi
+
     - name: Create macOS package
       run: |
         mkdir -p package/macOS
