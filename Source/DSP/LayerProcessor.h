@@ -6,7 +6,23 @@
 class LayerProcessor
 {
 public:
-    LayerProcessor() = default;
+    LayerProcessor()
+    {
+        // Initialize with default coefficients to prevent null pointer access
+        auto defaultLowPass = juce::dsp::IIR::Coefficients<float>::makeLowPass(44100.0, 200.0f, 0.707f);
+        auto defaultHighPass = juce::dsp::IIR::Coefficients<float>::makeHighPass(44100.0, 200.0f, 0.707f);
+        auto defaultHighPass2k = juce::dsp::IIR::Coefficients<float>::makeHighPass(44100.0, 2000.0f, 0.707f);
+        auto defaultLowPass2k = juce::dsp::IIR::Coefficients<float>::makeLowPass(44100.0, 2000.0f, 0.707f);
+
+        subLowPassL.coefficients = defaultLowPass;
+        subLowPassR.coefficients = defaultLowPass;
+        bodyHighPassL.coefficients = defaultHighPass;
+        bodyHighPassR.coefficients = defaultHighPass;
+        bodyLowPassL.coefficients = defaultLowPass2k;
+        bodyLowPassR.coefficients = defaultLowPass2k;
+        clickHighPassL.coefficients = defaultHighPass2k;
+        clickHighPassR.coefficients = defaultHighPass2k;
+    }
 
     void prepare(double sampleRate, int samplesPerBlock)
     {
@@ -22,7 +38,6 @@ public:
         subLowPassR.prepare(spec);
         subLowPassL.reset();
         subLowPassR.reset();
-        updateSubFilter();
 
         // Body layer: Band-pass 200 Hz - 2000 Hz
         bodyHighPassL.prepare(spec);
@@ -33,13 +48,16 @@ public:
         bodyHighPassR.reset();
         bodyLowPassL.reset();
         bodyLowPassR.reset();
-        updateBodyFilter();
 
         // Click layer: High-pass at 2000 Hz
         clickHighPassL.prepare(spec);
         clickHighPassR.prepare(spec);
         clickHighPassL.reset();
         clickHighPassR.reset();
+
+        // Initialize all filter coefficients
+        updateSubFilter();
+        updateBodyFilter();
         updateClickFilter();
 
         // Layer envelopes
@@ -225,8 +243,8 @@ private:
         if (currentSampleRate > 0)
         {
             auto coeffs = juce::dsp::IIR::Coefficients<float>::makeLowPass(currentSampleRate, 200.0f, 0.707f);
-            *subLowPassL.coefficients = *coeffs;
-            *subLowPassR.coefficients = *coeffs;
+            subLowPassL.coefficients = coeffs;
+            subLowPassR.coefficients = coeffs;
         }
     }
 
@@ -236,10 +254,10 @@ private:
         {
             auto hpCoeffs = juce::dsp::IIR::Coefficients<float>::makeHighPass(currentSampleRate, 200.0f, 0.707f);
             auto lpCoeffs = juce::dsp::IIR::Coefficients<float>::makeLowPass(currentSampleRate, 2000.0f, 0.707f);
-            *bodyHighPassL.coefficients = *hpCoeffs;
-            *bodyHighPassR.coefficients = *hpCoeffs;
-            *bodyLowPassL.coefficients = *lpCoeffs;
-            *bodyLowPassR.coefficients = *lpCoeffs;
+            bodyHighPassL.coefficients = hpCoeffs;
+            bodyHighPassR.coefficients = hpCoeffs;
+            bodyLowPassL.coefficients = lpCoeffs;
+            bodyLowPassR.coefficients = lpCoeffs;
         }
     }
 
@@ -248,8 +266,8 @@ private:
         if (currentSampleRate > 0)
         {
             auto coeffs = juce::dsp::IIR::Coefficients<float>::makeHighPass(currentSampleRate, 2000.0f, 0.707f);
-            *clickHighPassL.coefficients = *coeffs;
-            *clickHighPassR.coefficients = *coeffs;
+            clickHighPassL.coefficients = coeffs;
+            clickHighPassR.coefficients = coeffs;
         }
     }
 

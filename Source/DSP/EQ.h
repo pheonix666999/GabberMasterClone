@@ -9,7 +9,16 @@ class ParametricEQ
 public:
     static constexpr int numBands = 5;
 
-    ParametricEQ() = default;
+    ParametricEQ()
+    {
+        // Initialize with default coefficients to prevent null pointer access
+        auto defaultCoeffs = juce::dsp::IIR::Coefficients<float>::makePeakFilter(44100.0, 1000.0f, 1.0f, 1.0f);
+        for (int i = 0; i < numBands; ++i)
+        {
+            bandsL[i].coefficients = defaultCoeffs;
+            bandsR[i].coefficients = defaultCoeffs;
+        }
+    }
 
     void prepare(double sampleRate, int samplesPerBlock)
     {
@@ -26,6 +35,9 @@ public:
             bandsL[i].reset();
             bandsR[i].prepare(spec);
             bandsR[i].reset();
+
+            // Initialize coefficients for each band
+            updateBand(i);
         }
     }
 
@@ -163,8 +175,9 @@ private:
             juce::Decibels::decibelsToGain(gains[bandIndex])
         );
 
-        *bandsL[bandIndex].coefficients = *coefficients;
-        *bandsR[bandIndex].coefficients = *coefficients;
+        // Safely assign coefficients
+        bandsL[bandIndex].coefficients = coefficients;
+        bandsR[bandIndex].coefficients = coefficients;
     }
 
     double currentSampleRate = 44100.0;
