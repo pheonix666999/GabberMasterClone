@@ -248,6 +248,7 @@ void GabbermasterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     filter.prepare(sampleRate, samplesPerBlock);
     reverb.prepare(sampleRate, samplesPerBlock);
     parametricEQ.prepare(sampleRate, samplesPerBlock);
+    layerProcessor.prepare(sampleRate, samplesPerBlock);
 
     // Reset smoothed values
     driveSmoothed.reset(sampleRate, 0.05);
@@ -369,6 +370,24 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         parametricEQ.setBandParameters(band, freq, gain, q);
     }
 
+    // Get layer parameters
+    float subVolDb = apvts.getRawParameterValue("subVol")->load();
+    float subPitch = apvts.getRawParameterValue("subPitch")->load();
+    float subDecay = apvts.getRawParameterValue("subDecay")->load();
+
+    float bodyVolDb = apvts.getRawParameterValue("bodyVol")->load();
+    float bodyPitch = apvts.getRawParameterValue("bodyPitch")->load();
+    float bodyDecay = apvts.getRawParameterValue("bodyDecay")->load();
+
+    float clickVolDb = apvts.getRawParameterValue("clickVol")->load();
+    float clickPitch = apvts.getRawParameterValue("clickPitch")->load();
+    float clickDecay = apvts.getRawParameterValue("clickDecay")->load();
+
+    // Set layer parameters
+    layerProcessor.setSubParameters(subVolDb, subPitch, subDecay);
+    layerProcessor.setBodyParameters(bodyVolDb, bodyPitch, bodyDecay);
+    layerProcessor.setClickParameters(clickVolDb, clickPitch, clickDecay);
+
     // Set smoothed targets
     driveSmoothed.setTargetValue(drive / 100.0f);
     outputGainSmoothed.setTargetValue(juce::Decibels::decibelsToGain(outputDb));
@@ -382,6 +401,12 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         float sampleL = channelDataL[i];
         float sampleR = channelDataR ? channelDataR[i] : sampleL;
+
+        // Apply layer processing (multi-band split with volume/decay)
+        float layerOutL, layerOutR;
+        layerProcessor.processLayerMix(sampleL, sampleR, layerOutL, layerOutR);
+        sampleL = layerOutL;
+        sampleR = layerOutR;
 
         // Apply distortion (Pre)
         float driveVal = driveSmoothed.getNextValue();
@@ -426,6 +451,11 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         if (channelDataR)
             channelDataR[i] = sampleR * mixVal + (dryBuffer.getNumChannels() > 1 ? dryBuffer.getSample(1, i) : dryBuffer.getSample(0, i)) * (1.0f - mixVal);
     }
+
+    // Update layer levels for UI
+    subLevel.store(layerProcessor.getSubLevel());
+    bodyLevel.store(layerProcessor.getBodyLevel());
+    clickLevel.store(layerProcessor.getClickLevel());
 }
 
 void GabbermasterAudioProcessor::handleMidiEvent(const juce::MidiMessage& message)

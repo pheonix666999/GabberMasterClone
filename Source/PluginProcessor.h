@@ -6,6 +6,7 @@
 #include "DSP/Filter.h"
 #include "DSP/Reverb.h"
 #include "DSP/EQ.h"
+#include "DSP/LayerProcessor.h"
 
 //==============================================================================
 class GabbermasterAudioProcessor : public juce::AudioProcessor,
@@ -91,6 +92,7 @@ private:
     Filter filter;
     Reverb reverb;
     ParametricEQ parametricEQ;
+    LayerProcessor layerProcessor;
 
     // ADSR Envelope
     juce::ADSR adsr;
