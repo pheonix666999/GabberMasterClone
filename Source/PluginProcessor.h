@@ -5,6 +5,7 @@
 #include "DSP/Distortion.h"
 #include "DSP/Filter.h"
 #include "DSP/Reverb.h"
+#include "DSP/EQ.h"
 
 //==============================================================================
 class GabbermasterAudioProcessor : public juce::AudioProcessor,
@@ -66,6 +67,15 @@ public:
     void setSlowMode(bool slow) { slowMode.store(slow); }
     void setEffectsBypassed(bool bypassed) { effectsBypassed.store(bypassed); }
 
+    // EQ access for UI drawing
+    ParametricEQ& getEQ() { return parametricEQ; }
+    const ParametricEQ& getEQ() const { return parametricEQ; }
+
+    // Layer levels for UI
+    float getSubLevel() const { return subLevel.load(); }
+    float getBodyLevel() const { return bodyLevel.load(); }
+    float getClickLevel() const { return clickLevel.load(); }
+
 private:
     //==============================================================================
     // Audio Processing State Tree
@@ -80,6 +90,7 @@ private:
     Distortion distortion;
     Filter filter;
     Reverb reverb;
+    ParametricEQ parametricEQ;
 
     // ADSR Envelope
     juce::ADSR adsr;
@@ -126,6 +137,11 @@ private:
     std::atomic<int> currentFilterType{1}; // 0=HP, 1=LP, 2=BP
     std::atomic<bool> slowMode{false};
     std::atomic<bool> effectsBypassed{false};
+
+    // Layer level metering (for UI visualization)
+    std::atomic<float> subLevel{0.0f};
+    std::atomic<float> bodyLevel{0.0f};
+    std::atomic<float> clickLevel{0.0f};
 
     // Helper methods
     void handleMidiEvent(const juce::MidiMessage& message);

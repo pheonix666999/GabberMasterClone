@@ -55,6 +55,7 @@ target_sources(GabbermasterClone
         ../Source/DSP/Filter.h
         ../Source/DSP/Reverb.cpp
         ../Source/DSP/Reverb.h
+        ../Source/DSP/EQ.h
 )
 
 # Include directories

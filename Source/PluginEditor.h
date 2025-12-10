@@ -113,7 +113,182 @@ private:
     };
 
     GabberKnobLookAndFeel knobLookAndFeel;
-    
+
+    //==============================================================================
+    // EQ Curve Display Component
+    class EQCurveComponent : public juce::Component
+    {
+    public:
+        EQCurveComponent(GabbermasterAudioProcessor& p) : processor(p) {}
+
+        void paint(juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds().toFloat().reduced(2);
+
+            // Dark background
+            g.setColour(juce::Colour(0xff0a0a0a));
+            g.fillRoundedRectangle(bounds, 4.0f);
+
+            // Grid lines
+            g.setColour(juce::Colour(0xff222222));
+
+            // Horizontal grid (dB levels)
+            for (int i = 1; i < 6; ++i)
+            {
+                float y = bounds.getY() + i * bounds.getHeight() / 6.0f;
+                g.drawHorizontalLine(static_cast<int>(y), bounds.getX(), bounds.getRight());
+            }
+
+            // Vertical grid (frequency)
+            std::array<float, 8> freqMarkers = {50, 100, 200, 500, 1000, 2000, 5000, 10000};
+            for (float freq : freqMarkers)
+            {
+                float x = frequencyToX(freq, bounds);
+                g.drawVerticalLine(static_cast<int>(x), bounds.getY(), bounds.getBottom());
+            }
+
+            // Draw EQ curve
+            juce::Path curvePath;
+            bool pathStarted = false;
+
+            for (int x = 0; x < static_cast<int>(bounds.getWidth()); ++x)
+            {
+                float freq = xToFrequency(bounds.getX() + x, bounds);
+                float magnitude = processor.getEQ().getMagnitudeForFrequency(freq);
+                float dB = juce::Decibels::gainToDecibels(magnitude);
+                dB = juce::jlimit(-18.0f, 18.0f, dB);
+
+                float y = dBToY(dB, bounds);
+
+                if (!pathStarted)
+                {
+                    curvePath.startNewSubPath(bounds.getX() + x, y);
+                    pathStarted = true;
+                }
+                else
+                {
+                    curvePath.lineTo(bounds.getX() + x, y);
+                }
+            }
+
+            // Fill under curve with gradient
+            juce::Path fillPath = curvePath;
+            fillPath.lineTo(bounds.getRight(), bounds.getCentreY());
+            fillPath.lineTo(bounds.getX(), bounds.getCentreY());
+            fillPath.closeSubPath();
+
+            juce::ColourGradient fillGradient(
+                juce::Colour(0x40cc0000), bounds.getCentreX(), bounds.getY(),
+                juce::Colour(0x10cc0000), bounds.getCentreX(), bounds.getCentreY(),
+                false);
+            g.setGradientFill(fillGradient);
+            g.fillPath(fillPath);
+
+            // Draw the curve line
+            g.setColour(juce::Colour(0xffcc0000));
+            g.strokePath(curvePath, juce::PathStrokeType(2.0f));
+
+            // Draw band control points
+            auto& eq = processor.getEQ();
+            for (int band = 0; band < ParametricEQ::numBands; ++band)
+            {
+                float freq = eq.getFrequency(band);
+                float gain = eq.getGain(band);
+
+                float x = frequencyToX(freq, bounds);
+                float y = dBToY(gain, bounds);
+
+                // Glow effect
+                g.setColour(juce::Colour(0x40ff6666));
+                g.fillEllipse(x - 8, y - 8, 16, 16);
+
+                // Control point
+                g.setColour(juce::Colour(0xffcc0000));
+                g.fillEllipse(x - 5, y - 5, 10, 10);
+                g.setColour(juce::Colours::white);
+                g.drawEllipse(x - 5, y - 5, 10, 10, 1.0f);
+            }
+
+            // Border
+            g.setColour(juce::Colour(0xff444444));
+            g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
+
+            // Frequency labels
+            g.setColour(juce::Colour(0xff888888));
+            g.setFont(9.0f);
+            g.drawText("50", frequencyToX(50, bounds) - 10, bounds.getBottom() - 12, 20, 10, juce::Justification::centred);
+            g.drawText("100", frequencyToX(100, bounds) - 12, bounds.getBottom() - 12, 24, 10, juce::Justification::centred);
+            g.drawText("1k", frequencyToX(1000, bounds) - 8, bounds.getBottom() - 12, 16, 10, juce::Justification::centred);
+            g.drawText("10k", frequencyToX(10000, bounds) - 12, bounds.getBottom() - 12, 24, 10, juce::Justification::centred);
+        }
+
+        void mouseDown(const juce::MouseEvent& e) override { updateEQFromMouse(e); }
+        void mouseDrag(const juce::MouseEvent& e) override { updateEQFromMouse(e); }
+
+    private:
+        GabbermasterAudioProcessor& processor;
+
+        float frequencyToX(float freq, juce::Rectangle<float> bounds) const
+        {
+            float minLog = std::log10(20.0f);
+            float maxLog = std::log10(20000.0f);
+            float freqLog = std::log10(freq);
+            return bounds.getX() + (freqLog - minLog) / (maxLog - minLog) * bounds.getWidth();
+        }
+
+        float xToFrequency(float x, juce::Rectangle<float> bounds) const
+        {
+            float minLog = std::log10(20.0f);
+            float maxLog = std::log10(20000.0f);
+            float proportion = (x - bounds.getX()) / bounds.getWidth();
+            return std::pow(10.0f, minLog + proportion * (maxLog - minLog));
+        }
+
+        float dBToY(float dB, juce::Rectangle<float> bounds) const
+        {
+            float proportion = (18.0f - dB) / 36.0f;
+            return bounds.getY() + proportion * bounds.getHeight();
+        }
+
+        float yTodB(float y, juce::Rectangle<float> bounds) const
+        {
+            float proportion = (y - bounds.getY()) / bounds.getHeight();
+            return 18.0f - proportion * 36.0f;
+        }
+
+        void updateEQFromMouse(const juce::MouseEvent& e)
+        {
+            auto bounds = getLocalBounds().toFloat().reduced(2);
+            float freq = xToFrequency(static_cast<float>(e.x), bounds);
+            float dB = yTodB(static_cast<float>(e.y), bounds);
+
+            // Find closest band
+            auto& eq = processor.getEQ();
+            int closestBand = 0;
+            float closestDist = std::abs(std::log10(freq) - std::log10(eq.getFrequency(0)));
+
+            for (int band = 1; band < ParametricEQ::numBands; ++band)
+            {
+                float dist = std::abs(std::log10(freq) - std::log10(eq.getFrequency(band)));
+                if (dist < closestDist)
+                {
+                    closestDist = dist;
+                    closestBand = band;
+                }
+            }
+
+            // Update the closest band's gain
+            juce::String gainId = "eq" + juce::String(closestBand + 1) + "Gain";
+            if (auto* param = processor.getAPVTS().getParameter(gainId))
+            {
+                float normValue = param->getNormalisableRange().convertTo0to1(dB);
+                param->setValueNotifyingHost(normValue);
+            }
+
+            repaint();
+        }
+    };
+
     //==============================================================================
     GabbermasterAudioProcessor& audioProcessor;
     
@@ -180,7 +355,34 @@ private:
     // Toggle buttons for OFF/ON
     juce::ToggleButton offButton;
     juce::ToggleButton onButton;
-    
+
+    // EQ Curve display
+    std::unique_ptr<EQCurveComponent> eqCurve;
+
+    // Layer controls - Sub
+    ArcMotionSlider subVolKnob;
+    ArcMotionSlider subPitchKnob;
+    ArcMotionSlider subDecayKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> subVolAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> subPitchAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> subDecayAttachment;
+
+    // Layer controls - Body
+    ArcMotionSlider bodyVolKnob;
+    ArcMotionSlider bodyPitchKnob;
+    ArcMotionSlider bodyDecayKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> bodyVolAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> bodyPitchAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> bodyDecayAttachment;
+
+    // Layer controls - Click/Transient
+    ArcMotionSlider clickVolKnob;
+    ArcMotionSlider clickPitchKnob;
+    ArcMotionSlider clickDecayKnob;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> clickVolAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> clickPitchAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> clickDecayAttachment;
+
     // Labels
     std::vector<std::unique_ptr<juce::Label>> labels;
     

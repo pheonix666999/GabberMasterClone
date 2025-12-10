@@ -5,7 +5,7 @@
 GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (GabbermasterAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    setSize (750, 420);
+    setSize (850, 580);
 
     // Preset selector (Fag Tag dropdown)
     presetSelector.addItem("Fag Tag", 1);
@@ -170,6 +170,49 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     setupRotarySlider(mixKnob, "%");
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "mix", mixKnob);
+
+    // EQ Curve display
+    eqCurve = std::make_unique<EQCurveComponent>(audioProcessor);
+    addAndMakeVisible(eqCurve.get());
+
+    // Layer controls - Sub
+    setupRotarySlider(subVolKnob, " dB");
+    subVolAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "subVol", subVolKnob);
+
+    setupRotarySlider(subPitchKnob, " st");
+    subPitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "subPitch", subPitchKnob);
+
+    setupRotarySlider(subDecayKnob, " ms");
+    subDecayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "subDecay", subDecayKnob);
+
+    // Layer controls - Body
+    setupRotarySlider(bodyVolKnob, " dB");
+    bodyVolAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "bodyVol", bodyVolKnob);
+
+    setupRotarySlider(bodyPitchKnob, " st");
+    bodyPitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "bodyPitch", bodyPitchKnob);
+
+    setupRotarySlider(bodyDecayKnob, " ms");
+    bodyDecayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "bodyDecay", bodyDecayKnob);
+
+    // Layer controls - Click
+    setupRotarySlider(clickVolKnob, " dB");
+    clickVolAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "clickVol", clickVolKnob);
+
+    setupRotarySlider(clickPitchKnob, " st");
+    clickPitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "clickPitch", clickPitchKnob);
+
+    setupRotarySlider(clickDecayKnob, " ms");
+    clickDecayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), "clickDecay", clickDecayKnob);
 
     startTimer(50);
 }
@@ -358,6 +401,48 @@ void GabbermasterAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText("OFF", 75, row3LabelY + 14, knobSize, 12, juce::Justification::centred);
     g.drawText("ON", 135, row3LabelY + 14, knobSize, 12, juce::Justification::centred);
 
+    // EQ Section label
+    g.setColour(juce::Colour(0xffcc0000));
+    g.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+    g.drawText("EQ CURVE", 360, 300, 100, 18, juce::Justification::left);
+
+    // Layer controls section
+    g.setColour(juce::Colour(0xffcc0000));
+    g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+    g.drawText("LAYERS", 15, 360, 80, 16, juce::Justification::left);
+
+    // Layer section labels
+    g.setColour(juce::Colours::white);
+    g.setFont(juce::FontOptions(10.0f));
+
+    int layerY = 380;
+    int layerKnobSize = 45;
+    int layerSpacing = 52;
+
+    // Sub layer labels
+    g.setColour(juce::Colour(0xff00cc00)); // Green for sub
+    g.drawText("SUB", 15, layerY - 14, 50, 12, juce::Justification::left);
+    g.setColour(juce::Colours::white);
+    g.drawText("Vol", 15, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Pitch", 15 + layerSpacing, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Decay", 15 + layerSpacing * 2, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+
+    // Body layer labels
+    g.setColour(juce::Colour(0xffcccc00)); // Yellow for body
+    g.drawText("BODY", 15, layerY + 70 - 14, 50, 12, juce::Justification::left);
+    g.setColour(juce::Colours::white);
+    g.drawText("Vol", 15, layerY + 70 + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Pitch", 15 + layerSpacing, layerY + 70 + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Decay", 15 + layerSpacing * 2, layerY + 70 + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+
+    // Click layer labels
+    g.setColour(juce::Colour(0xffcc6600)); // Orange for click
+    g.drawText("CLICK", 185, layerY - 14, 50, 12, juce::Justification::left);
+    g.setColour(juce::Colours::white);
+    g.drawText("Vol", 185, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Pitch", 185 + layerSpacing, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Decay", 185 + layerSpacing * 2, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+
     // Website watermark
     g.setColour(juce::Colour(0xffcc0000));
     g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
@@ -407,12 +492,35 @@ void GabbermasterAudioProcessorEditor::resized()
     mixKnob.setBounds(195, row3Y, knobSize, knobSize);
 
     // SLOW/FAST radio buttons
-    slowButton.setBounds(365, 375, 70, 24);
-    fastButton.setBounds(445, 375, 70, 24);
+    slowButton.setBounds(15, 540, 70, 24);
+    fastButton.setBounds(90, 540, 70, 24);
 
     // OFF/ON toggle buttons
-    offButton.setBounds(580, 375, 60, 24);
-    onButton.setBounds(655, 375, 60, 24);
+    offButton.setBounds(180, 540, 60, 24);
+    onButton.setBounds(250, 540, 60, 24);
+
+    // EQ Curve display (right side, large)
+    eqCurve->setBounds(360, 320, 475, 140);
+
+    // Layer controls section (bottom left)
+    int layerY = 380;
+    int layerKnobSize = 45;
+    int layerSpacing = 52;
+
+    // Sub layer
+    subVolKnob.setBounds(15, layerY, layerKnobSize, layerKnobSize);
+    subPitchKnob.setBounds(15 + layerSpacing, layerY, layerKnobSize, layerKnobSize);
+    subDecayKnob.setBounds(15 + layerSpacing * 2, layerY, layerKnobSize, layerKnobSize);
+
+    // Body layer
+    bodyVolKnob.setBounds(15, layerY + 70, layerKnobSize, layerKnobSize);
+    bodyPitchKnob.setBounds(15 + layerSpacing, layerY + 70, layerKnobSize, layerKnobSize);
+    bodyDecayKnob.setBounds(15 + layerSpacing * 2, layerY + 70, layerKnobSize, layerKnobSize);
+
+    // Click layer
+    clickVolKnob.setBounds(185, layerY, layerKnobSize, layerKnobSize);
+    clickPitchKnob.setBounds(185 + layerSpacing, layerY, layerKnobSize, layerKnobSize);
+    clickDecayKnob.setBounds(185 + layerSpacing * 2, layerY, layerKnobSize, layerKnobSize);
 }
 
 void GabbermasterAudioProcessorEditor::timerCallback()

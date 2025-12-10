@@ -100,6 +100,77 @@ juce::AudioProcessorValueTreeState::ParameterLayout GabbermasterAudioProcessor::
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "damp", "Damping", 0.0f, 1.0f, 0.5f));
 
+    // EQ Band parameters (5 bands)
+    // Band 1 - Sub (80 Hz)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq1Freq", "EQ1 Frequency",
+        juce::NormalisableRange<float>(20.0f, 200.0f, 1.0f, 0.5f), 80.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq1Gain", "EQ1 Gain", -18.0f, 18.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq1Q", "EQ1 Q", 0.1f, 10.0f, 1.0f));
+
+    // Band 2 - Low-mid (250 Hz)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq2Freq", "EQ2 Frequency",
+        juce::NormalisableRange<float>(100.0f, 500.0f, 1.0f, 0.5f), 250.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq2Gain", "EQ2 Gain", -18.0f, 18.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq2Q", "EQ2 Q", 0.1f, 10.0f, 1.0f));
+
+    // Band 3 - Mid (1000 Hz)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq3Freq", "EQ3 Frequency",
+        juce::NormalisableRange<float>(400.0f, 2000.0f, 1.0f, 0.5f), 1000.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq3Gain", "EQ3 Gain", -18.0f, 18.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq3Q", "EQ3 Q", 0.1f, 10.0f, 1.0f));
+
+    // Band 4 - High-mid (4000 Hz)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq4Freq", "EQ4 Frequency",
+        juce::NormalisableRange<float>(2000.0f, 8000.0f, 1.0f, 0.5f), 4000.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq4Gain", "EQ4 Gain", -18.0f, 18.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq4Q", "EQ4 Q", 0.1f, 10.0f, 1.0f));
+
+    // Band 5 - High (12000 Hz)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq5Freq", "EQ5 Frequency",
+        juce::NormalisableRange<float>(8000.0f, 20000.0f, 1.0f, 0.5f), 12000.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq5Gain", "EQ5 Gain", -18.0f, 18.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq5Q", "EQ5 Q", 0.1f, 10.0f, 1.0f));
+
+    // Layer controls
+    // Sub layer (low frequencies)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "subVol", "Sub Volume", -60.0f, 12.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "subPitch", "Sub Pitch", -24.0f, 24.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "subDecay", "Sub Decay", 10.0f, 2000.0f, 500.0f));
+
+    // Body layer (mid frequencies)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "bodyVol", "Body Volume", -60.0f, 12.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "bodyPitch", "Body Pitch", -24.0f, 24.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "bodyDecay", "Body Decay", 10.0f, 2000.0f, 300.0f));
+
+    // Click/Transient layer (high frequencies)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "clickVol", "Click Volume", -60.0f, 12.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "clickPitch", "Click Pitch", -24.0f, 24.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "clickDecay", "Click Decay", 1.0f, 500.0f, 50.0f));
+
     return { params.begin(), params.end() };
 }
 
@@ -176,6 +247,7 @@ void GabbermasterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     distortion.prepare(sampleRate, samplesPerBlock);
     filter.prepare(sampleRate, samplesPerBlock);
     reverb.prepare(sampleRate, samplesPerBlock);
+    parametricEQ.prepare(sampleRate, samplesPerBlock);
 
     // Reset smoothed values
     driveSmoothed.reset(sampleRate, 0.05);
@@ -283,6 +355,20 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Set reverb parameters
     reverb.setParameters(roomSize, width, damping);
 
+    // Update EQ parameters
+    for (int band = 0; band < ParametricEQ::numBands; ++band)
+    {
+        juce::String freqId = "eq" + juce::String(band + 1) + "Freq";
+        juce::String gainId = "eq" + juce::String(band + 1) + "Gain";
+        juce::String qId = "eq" + juce::String(band + 1) + "Q";
+
+        float freq = apvts.getRawParameterValue(freqId)->load();
+        float gain = apvts.getRawParameterValue(gainId)->load();
+        float q = apvts.getRawParameterValue(qId)->load();
+
+        parametricEQ.setBandParameters(band, freq, gain, q);
+    }
+
     // Set smoothed targets
     driveSmoothed.setTargetValue(drive / 100.0f);
     outputGainSmoothed.setTargetValue(juce::Decibels::decibelsToGain(outputDb));
@@ -319,6 +405,9 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             sampleL = filter.processSample(sampleL, hpf, lpf, resonance);
             sampleR = filter.processSample(sampleR, hpf, lpf, resonance);
         }
+
+        // Apply parametric EQ
+        parametricEQ.processStereo(sampleL, sampleR);
 
         // Apply reverb
         if (roomSize > 0.01f)
