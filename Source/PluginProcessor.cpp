@@ -1,6 +1,17 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace
+{
+    void logMessage(const juce::String& message)
+    {
+        auto logFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                           .getChildFile("gabbermaster_log.txt");
+        auto timestamp = juce::Time::getCurrentTime().toString(true, true, true, true);
+        logFile.appendText(timestamp + " " + message + "\n");
+    }
+}
+
 //==============================================================================
 GabbermasterAudioProcessor::GabbermasterAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -10,11 +21,13 @@ GabbermasterAudioProcessor::GabbermasterAudioProcessor()
                        .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                     #endif
-                       ),
+#endif
+        ),
 #endif
     apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
+    logMessage("Processor ctor start");
+
     // Register audio formats
     formatManager.registerBasicFormats();
 
@@ -25,6 +38,8 @@ GabbermasterAudioProcessor::GabbermasterAudioProcessor()
     driveSmoothed.reset(44100.0, 0.05);
     outputGainSmoothed.reset(44100.0, 0.05);
     mixSmoothed.reset(44100.0, 0.05);
+
+    logMessage("Processor ctor end");
 }
 
 GabbermasterAudioProcessor::~GabbermasterAudioProcessor()
@@ -36,9 +51,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout GabbermasterAudioProcessor::
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
-    // Preset selector
+    // Preset selector (48 slots like original UI)
     params.push_back(std::make_unique<juce::AudioParameterInt>(
-        "preset", "Preset", 0, 19, 0));
+        "preset", "Preset", 0, 47, 0));
 
     // Destroy section
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -241,6 +256,8 @@ void GabbermasterAudioProcessor::changeProgramName (int index, const juce::Strin
 //==============================================================================
 void GabbermasterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    logMessage("prepareToPlay sampleRate=" + juce::String(sampleRate) +
+               " block=" + juce::String(samplesPerBlock));
     currentSampleRate = sampleRate;
 
     // Prepare DSP

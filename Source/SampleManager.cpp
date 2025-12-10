@@ -13,7 +13,7 @@ SampleManager::~SampleManager()
 
 void SampleManager::loadDefaultSamples()
 {
-    // Create 20 synthetic hardcore kick samples with varying characteristics
+    // Create 48 synthetic hardcore kick samples with varying characteristics
     double sampleRate = 44100.0;
     
     struct KickPreset
@@ -23,8 +23,8 @@ void SampleManager::loadDefaultSamples()
         float distortion;
     };
     
-    // Define kick presets with different characteristics
-    std::vector<KickPreset> presets = {
+    // Base kick presets with different characteristics
+    std::vector<KickPreset> basePresets = {
         // Classic gabber kicks
         {60.0f, 0.3f, 0.8f},   // Deep, punchy
         {70.0f, 0.25f, 0.9f},  // Mid, distorted
@@ -33,9 +33,9 @@ void SampleManager::loadDefaultSamples()
         {65.0f, 0.35f, 0.85f}, // Balanced
         
         // Speedcore/Terror kicks
-        {90.0f, 0.15f, 1.0f},  // Fast attack, brutal
+        {90.0f, 0.15f, 1.0f},   // Fast attack, brutal
         {100.0f, 0.12f, 0.98f}, // Ultra fast
-        {85.0f, 0.18f, 0.92f}, // Speed gabber
+        {85.0f, 0.18f, 0.92f},  // Speed gabber
         
         // Hardstyle kicks
         {55.0f, 0.5f, 0.6f},   // Reverse bass
@@ -55,6 +55,32 @@ void SampleManager::loadDefaultSamples()
         {72.0f, 0.26f, 0.86f}, // Crunchy
         {63.0f, 0.32f, 0.73f}  // Balanced soft
     };
+    
+    // Expand to 48 presets by lightly varying the base set
+    std::vector<KickPreset> presets;
+    presets.reserve(48);
+    
+    auto addVariant = [&](const KickPreset& src, int variantIdx)
+    {
+        float freqScale = 1.0f + 0.03f * static_cast<float>((variantIdx % 4) - 1);  // -0.03, 0, 0.03, 0.06
+        float decayScale = 1.0f + 0.05f * static_cast<float>((variantIdx % 3) - 1); // -0.05, 0, 0.05
+        float distOffset = 0.05f * static_cast<float>((variantIdx % 5) - 2);        // -0.1 .. +0.1
+        
+        KickPreset p;
+        p.frequency = juce::jlimit(35.0f, 140.0f, src.frequency * freqScale);
+        p.decay = juce::jlimit(0.08f, 0.8f, src.decay * decayScale);
+        p.distortion = juce::jlimit(0.4f, 1.1f, src.distortion + distOffset);
+        
+        presets.push_back(p);
+    };
+    
+    int variant = 0;
+    while (presets.size() < 48)
+    {
+        const auto& src = basePresets[variant % basePresets.size()];
+        addVariant(src, variant);
+        variant++;
+    }
     
     for (const auto& preset : presets)
     {

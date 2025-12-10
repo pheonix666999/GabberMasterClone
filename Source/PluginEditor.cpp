@@ -1,11 +1,22 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace
+{
+    void logMessage(const juce::String& message)
+    {
+        auto logFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                           .getChildFile("gabbermaster_log.txt");
+        auto timestamp = juce::Time::getCurrentTime().toString(true, true, true, true);
+        logFile.appendText(timestamp + " " + message + "\n");
+    }
+}
+
 //==============================================================================
 GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (GabbermasterAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    setSize (850, 580);
+    logMessage("Editor ctor start");
 
     // Preset selector (Fag Tag dropdown)
     presetSelector.addItem("Fag Tag", 1);
@@ -19,6 +30,7 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     addAndMakeVisible(presetSelector);
     presetAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.getAPVTS(), "preset", presetSelector);
+    logMessage("Editor: preset selector wired");
 
     // GO! button
     goButton.setButtonText("GO!");
@@ -62,6 +74,7 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
         audioProcessor.setFilterType(filterTypeSelector.getSelectedId() - 1);
     };
     addAndMakeVisible(filterTypeSelector);
+    logMessage("Editor: filter type selector ready");
 
     // SLOW/FAST radio buttons
     slowButton.setButtonText("SLOW");
@@ -84,6 +97,7 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
         slowButton.setToggleState(false, juce::dontSendNotification);
     };
     addAndMakeVisible(fastButton);
+    logMessage("Editor: slow/fast buttons ready");
 
     // OFF/ON toggle buttons
     offButton.setButtonText("OFF");
@@ -106,6 +120,7 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
         offButton.setToggleState(false, juce::dontSendNotification);
     };
     addAndMakeVisible(onButton);
+    logMessage("Editor: on/off buttons ready");
 
     // Row 1 - Envelope section (5 knobs): Attack, Decay, Release, Sustain, Volume
     setupRotarySlider(attackKnob, " ms");
@@ -136,6 +151,7 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     setupRotarySlider(postKnob, "");
     postAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "saturate", postKnob);
+    logMessage("Editor: row1 knobs wired");
 
     // Row 2 - Filter section (4 knobs): Cutoff, Q, Track, Env
     setupRotarySlider(cutoffKnob, " Hz");
@@ -153,6 +169,7 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     setupRotarySlider(envKnob, "");
     envAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "filterEnv", envKnob);
+    logMessage("Editor: row2 knobs wired");
 
     // Row 3 - Effects section (4 knobs): Room, Width, Damp, Mix
     setupRotarySlider(roomKnob, "");
@@ -170,10 +187,12 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     setupRotarySlider(mixKnob, "%");
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "mix", mixKnob);
+    logMessage("Editor: row3 knobs wired");
 
     // EQ Curve display
     eqCurve = std::make_unique<EQCurveComponent>(audioProcessor);
     addAndMakeVisible(eqCurve.get());
+    logMessage("Editor: EQ curve created");
 
     // Layer controls - Sub
     setupRotarySlider(subVolKnob, " dB");
@@ -214,7 +233,10 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     clickDecayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "clickDecay", clickDecayKnob);
 
+    setSize (850, 580);
+    logMessage("Editor: after setSize");
     startTimer(50);
+    logMessage("Editor ctor end");
 }
 
 GabbermasterAudioProcessorEditor::~GabbermasterAudioProcessorEditor()
@@ -500,7 +522,8 @@ void GabbermasterAudioProcessorEditor::resized()
     onButton.setBounds(250, 540, 60, 24);
 
     // EQ Curve display (right side, large)
-    eqCurve->setBounds(360, 320, 475, 140);
+    if (eqCurve != nullptr)
+        eqCurve->setBounds(360, 320, 475, 140);
 
     // Layer controls section (bottom left)
     int layerY = 380;
