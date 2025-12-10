@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <juce_dsp/juce_dsp.h>
 
 class LayerProcessor
 {
@@ -14,23 +15,31 @@ public:
         juce::dsp::ProcessSpec spec;
         spec.sampleRate = sampleRate;
         spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
-        spec.numChannels = 2;
+        spec.numChannels = 1;  // Each filter handles one channel
 
         // Sub layer: Low-pass at 200 Hz
-        subLowPass.prepare(spec);
-        subLowPass.reset();
+        subLowPassL.prepare(spec);
+        subLowPassR.prepare(spec);
+        subLowPassL.reset();
+        subLowPassR.reset();
         updateSubFilter();
 
         // Body layer: Band-pass 200 Hz - 2000 Hz
-        bodyHighPass.prepare(spec);
-        bodyLowPass.prepare(spec);
-        bodyHighPass.reset();
-        bodyLowPass.reset();
+        bodyHighPassL.prepare(spec);
+        bodyHighPassR.prepare(spec);
+        bodyLowPassL.prepare(spec);
+        bodyLowPassR.prepare(spec);
+        bodyHighPassL.reset();
+        bodyHighPassR.reset();
+        bodyLowPassL.reset();
+        bodyLowPassR.reset();
         updateBodyFilter();
 
         // Click layer: High-pass at 2000 Hz
-        clickHighPass.prepare(spec);
-        clickHighPass.reset();
+        clickHighPassL.prepare(spec);
+        clickHighPassR.prepare(spec);
+        clickHighPassL.reset();
+        clickHighPassR.reset();
         updateClickFilter();
 
         // Layer envelopes
@@ -134,19 +143,19 @@ public:
 
         // Split input into frequency bands
         // Sub layer (low frequencies < 200 Hz)
-        float subL = subLowPass.processSample(0, inputL);
-        float subR = subLowPass.processSample(1, inputR);
+        float subL = subLowPassL.processSample(inputL);
+        float subR = subLowPassR.processSample(inputR);
 
         // Click layer (high frequencies > 2000 Hz)
-        float clickL = clickHighPass.processSample(0, inputL);
-        float clickR = clickHighPass.processSample(1, inputR);
+        float clickL = clickHighPassL.processSample(inputL);
+        float clickR = clickHighPassR.processSample(inputR);
 
         // Body layer (mid frequencies 200-2000 Hz)
         // First high-pass to remove sub, then low-pass to remove click
-        float bodyL = bodyHighPass.processSample(0, inputL);
-        bodyL = bodyLowPass.processSample(0, bodyL);
-        float bodyR = bodyHighPass.processSample(1, inputR);
-        bodyR = bodyLowPass.processSample(1, bodyR);
+        float bodyL = bodyHighPassL.processSample(inputL);
+        bodyL = bodyLowPassL.processSample(bodyL);
+        float bodyR = bodyHighPassR.processSample(inputR);
+        bodyR = bodyLowPassR.processSample(bodyR);
 
         // Apply volume and envelope to each layer
         subL *= subVol * subEnvVal;
@@ -177,16 +186,16 @@ public:
         float clickVol = clickVolSmoothed.getNextValue();
 
         // Split input into frequency bands
-        float subL = subLowPass.processSample(0, inputL);
-        float subR = subLowPass.processSample(1, inputR);
+        float subL = subLowPassL.processSample(inputL);
+        float subR = subLowPassR.processSample(inputR);
 
-        float clickL = clickHighPass.processSample(0, inputL);
-        float clickR = clickHighPass.processSample(1, inputR);
+        float clickL = clickHighPassL.processSample(inputL);
+        float clickR = clickHighPassR.processSample(inputR);
 
-        float bodyL = bodyHighPass.processSample(0, inputL);
-        bodyL = bodyLowPass.processSample(0, bodyL);
-        float bodyR = bodyHighPass.processSample(1, inputR);
-        bodyR = bodyLowPass.processSample(1, bodyR);
+        float bodyL = bodyHighPassL.processSample(inputL);
+        bodyL = bodyLowPassL.processSample(bodyL);
+        float bodyR = bodyHighPassR.processSample(inputR);
+        bodyR = bodyLowPassR.processSample(bodyR);
 
         // Apply volume to each layer
         subL *= subVol;
@@ -216,7 +225,8 @@ private:
         if (currentSampleRate > 0)
         {
             auto coeffs = juce::dsp::IIR::Coefficients<float>::makeLowPass(currentSampleRate, 200.0f, 0.707f);
-            *subLowPass.state = *coeffs;
+            *subLowPassL.coefficients = *coeffs;
+            *subLowPassR.coefficients = *coeffs;
         }
     }
 
@@ -226,8 +236,10 @@ private:
         {
             auto hpCoeffs = juce::dsp::IIR::Coefficients<float>::makeHighPass(currentSampleRate, 200.0f, 0.707f);
             auto lpCoeffs = juce::dsp::IIR::Coefficients<float>::makeLowPass(currentSampleRate, 2000.0f, 0.707f);
-            *bodyHighPass.state = *hpCoeffs;
-            *bodyLowPass.state = *lpCoeffs;
+            *bodyHighPassL.coefficients = *hpCoeffs;
+            *bodyHighPassR.coefficients = *hpCoeffs;
+            *bodyLowPassL.coefficients = *lpCoeffs;
+            *bodyLowPassR.coefficients = *lpCoeffs;
         }
     }
 
@@ -236,18 +248,19 @@ private:
         if (currentSampleRate > 0)
         {
             auto coeffs = juce::dsp::IIR::Coefficients<float>::makeHighPass(currentSampleRate, 2000.0f, 0.707f);
-            *clickHighPass.state = *coeffs;
+            *clickHighPassL.coefficients = *coeffs;
+            *clickHighPassR.coefficients = *coeffs;
         }
     }
 
     double currentSampleRate = 44100.0;
     bool isActive = false;
 
-    // Filters for band splitting
-    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> subLowPass;
-    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> bodyHighPass;
-    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> bodyLowPass;
-    juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> clickHighPass;
+    // Separate filters for left and right channels
+    juce::dsp::IIR::Filter<float> subLowPassL, subLowPassR;
+    juce::dsp::IIR::Filter<float> bodyHighPassL, bodyHighPassR;
+    juce::dsp::IIR::Filter<float> bodyLowPassL, bodyLowPassR;
+    juce::dsp::IIR::Filter<float> clickHighPassL, clickHighPassR;
 
     // Per-layer envelopes
     juce::ADSR subEnvelope;

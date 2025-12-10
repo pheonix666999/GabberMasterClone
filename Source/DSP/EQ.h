@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <juce_dsp/juce_dsp.h>
 #include <array>
 
 class ParametricEQ
@@ -17,12 +18,14 @@ public:
         juce::dsp::ProcessSpec spec;
         spec.sampleRate = sampleRate;
         spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
-        spec.numChannels = 2;
+        spec.numChannels = 1;  // Each filter handles one channel
 
-        for (auto& band : bands)
+        for (int i = 0; i < numBands; ++i)
         {
-            band.prepare(spec);
-            band.reset();
+            bandsL[i].prepare(spec);
+            bandsL[i].reset();
+            bandsR[i].prepare(spec);
+            bandsR[i].reset();
         }
     }
 
@@ -86,25 +89,30 @@ public:
         {
             if (std::abs(gains[i]) > 0.1f) // Only process if gain is significant
             {
-                // Process left channel
-                left = bands[i].processSample(0, left);
-                // Process right channel
-                right = bands[i].processSample(1, right);
+                left = bandsL[i].processSample(left);
+                right = bandsR[i].processSample(right);
             }
         }
     }
 
     void processBlock(juce::AudioBuffer<float>& buffer)
     {
-        juce::dsp::AudioBlock<float> block(buffer);
+        if (buffer.getNumChannels() < 1)
+            return;
 
-        for (int i = 0; i < numBands; ++i)
+        auto* leftChannel = buffer.getWritePointer(0);
+        auto* rightChannel = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
-            if (std::abs(gains[i]) > 0.1f)
-            {
-                juce::dsp::ProcessContextReplacing<float> context(block);
-                bands[i].process(context);
-            }
+            float left = leftChannel[sample];
+            float right = rightChannel ? rightChannel[sample] : left;
+
+            processStereo(left, right);
+
+            leftChannel[sample] = left;
+            if (rightChannel)
+                rightChannel[sample] = right;
         }
     }
 
@@ -155,13 +163,15 @@ private:
             juce::Decibels::decibelsToGain(gains[bandIndex])
         );
 
-        *bands[bandIndex].state = *coefficients;
+        *bandsL[bandIndex].coefficients = *coefficients;
+        *bandsR[bandIndex].coefficients = *coefficients;
     }
 
     double currentSampleRate = 44100.0;
 
-    std::array<juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>,
-               juce::dsp::IIR::Coefficients<float>>, numBands> bands;
+    // Separate filters for left and right channels
+    std::array<juce::dsp::IIR::Filter<float>, numBands> bandsL;
+    std::array<juce::dsp::IIR::Filter<float>, numBands> bandsR;
 
     std::array<float, numBands> frequencies = {80.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
     std::array<float, numBands> gains = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
