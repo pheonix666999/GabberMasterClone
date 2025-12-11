@@ -1,15 +1,11 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-namespace
+// Debug logging helper
+static void logMessage(const juce::String& msg)
 {
-    void logMessage(const juce::String& message)
-    {
-        auto logFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                           .getChildFile("gabbermaster_log.txt");
-        auto timestamp = juce::Time::getCurrentTime().toString(true, true, true, true);
-        logFile.appendText(timestamp + " " + message + "\n");
-    }
+    juce::Logger::writeToLog(msg);
+    DBG(msg);
 }
 
 //==============================================================================
@@ -21,13 +17,11 @@ GabbermasterAudioProcessor::GabbermasterAudioProcessor()
                        .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-#endif
-        ),
+                     #endif
+                       ),
 #endif
     apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
-    logMessage("Processor ctor start");
-
     // Register audio formats
     formatManager.registerBasicFormats();
 
@@ -38,8 +32,6 @@ GabbermasterAudioProcessor::GabbermasterAudioProcessor()
     driveSmoothed.reset(44100.0, 0.05);
     outputGainSmoothed.reset(44100.0, 0.05);
     mixSmoothed.reset(44100.0, 0.05);
-
-    logMessage("Processor ctor end");
 }
 
 GabbermasterAudioProcessor::~GabbermasterAudioProcessor()
@@ -54,6 +46,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout GabbermasterAudioProcessor::
     // Preset selector (48 slots like original UI)
     params.push_back(std::make_unique<juce::AudioParameterInt>(
         "preset", "Preset", 0, 47, 0));
+
+    // Kick Mode selector (Viper, Evil, Hard, Soft, Raw, Metal)
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "kickMode", "Kick Mode",
+        juce::StringArray{"Viper", "Evil", "Hard", "Soft", "Raw", "Metal"}, 0));
 
     // Destroy section
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -81,6 +78,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout GabbermasterAudioProcessor::
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "filterEnv", "Filter Envelope", 0.0f, 1.0f, 0.0f));
+
+    // Track knob - keyboard tracking for filter
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "track", "Track", 0.0f, 100.0f, 0.0f));
 
     // Envelope section
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -115,51 +116,78 @@ juce::AudioProcessorValueTreeState::ParameterLayout GabbermasterAudioProcessor::
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "damp", "Damping", 0.0f, 1.0f, 0.5f));
 
-    // EQ Band parameters (5 bands)
-    // Band 1 - Sub (80 Hz)
+    // Enhanced EQ - 8 bands for detailed kick sculpting
+    // Band 1 - Sub Bass (30-60 Hz) - for deep sub weight
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq1Freq", "EQ1 Frequency",
-        juce::NormalisableRange<float>(20.0f, 200.0f, 1.0f, 0.5f), 80.0f));
+        "eq1Freq", "Sub Frequency",
+        juce::NormalisableRange<float>(20.0f, 80.0f, 0.1f, 0.5f), 40.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq1Gain", "EQ1 Gain", -18.0f, 18.0f, 0.0f));
+        "eq1Gain", "Sub Gain", -24.0f, 24.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq1Q", "EQ1 Q", 0.1f, 10.0f, 1.0f));
+        "eq1Q", "Sub Q", 0.1f, 10.0f, 0.7f));
 
-    // Band 2 - Low-mid (250 Hz)
+    // Band 2 - Bass Punch (60-120 Hz) - fundamental punch
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq2Freq", "EQ2 Frequency",
-        juce::NormalisableRange<float>(100.0f, 500.0f, 1.0f, 0.5f), 250.0f));
+        "eq2Freq", "Punch Frequency",
+        juce::NormalisableRange<float>(50.0f, 150.0f, 0.1f, 0.5f), 80.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq2Gain", "EQ2 Gain", -18.0f, 18.0f, 0.0f));
+        "eq2Gain", "Punch Gain", -24.0f, 24.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq2Q", "EQ2 Q", 0.1f, 10.0f, 1.0f));
+        "eq2Q", "Punch Q", 0.1f, 10.0f, 1.0f));
 
-    // Band 3 - Mid (1000 Hz)
+    // Band 3 - Low Body (120-300 Hz) - body/weight
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq3Freq", "EQ3 Frequency",
-        juce::NormalisableRange<float>(400.0f, 2000.0f, 1.0f, 0.5f), 1000.0f));
+        "eq3Freq", "Body Frequency",
+        juce::NormalisableRange<float>(100.0f, 400.0f, 0.1f, 0.5f), 200.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq3Gain", "EQ3 Gain", -18.0f, 18.0f, 0.0f));
+        "eq3Gain", "Body Gain", -24.0f, 24.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq3Q", "EQ3 Q", 0.1f, 10.0f, 1.0f));
+        "eq3Q", "Body Q", 0.1f, 10.0f, 1.0f));
 
-    // Band 4 - High-mid (4000 Hz)
+    // Band 4 - Low-Mid (300-800 Hz) - mud/warmth control
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq4Freq", "EQ4 Frequency",
-        juce::NormalisableRange<float>(2000.0f, 8000.0f, 1.0f, 0.5f), 4000.0f));
+        "eq4Freq", "Low-Mid Frequency",
+        juce::NormalisableRange<float>(250.0f, 1000.0f, 0.1f, 0.5f), 500.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq4Gain", "EQ4 Gain", -18.0f, 18.0f, 0.0f));
+        "eq4Gain", "Low-Mid Gain", -24.0f, 24.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq4Q", "EQ4 Q", 0.1f, 10.0f, 1.0f));
+        "eq4Q", "Low-Mid Q", 0.1f, 10.0f, 1.0f));
 
-    // Band 5 - High (12000 Hz)
+    // Band 5 - Mid (800-2000 Hz) - attack definition
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq5Freq", "EQ5 Frequency",
+        "eq5Freq", "Mid Frequency",
+        juce::NormalisableRange<float>(600.0f, 2500.0f, 0.1f, 0.5f), 1200.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq5Gain", "Mid Gain", -24.0f, 24.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq5Q", "Mid Q", 0.1f, 10.0f, 1.0f));
+
+    // Band 6 - High-Mid Click (2-5 kHz) - click/attack
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq6Freq", "Click Frequency",
+        juce::NormalisableRange<float>(1500.0f, 6000.0f, 1.0f, 0.5f), 3000.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq6Gain", "Click Gain", -24.0f, 24.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq6Q", "Click Q", 0.1f, 10.0f, 1.5f));
+
+    // Band 7 - Presence (5-10 kHz) - brightness/presence
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq7Freq", "Presence Frequency",
+        juce::NormalisableRange<float>(4000.0f, 12000.0f, 1.0f, 0.5f), 7000.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq7Gain", "Presence Gain", -24.0f, 24.0f, 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq7Q", "Presence Q", 0.1f, 10.0f, 1.0f));
+
+    // Band 8 - Air (10-20 kHz) - air/sparkle
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        "eq8Freq", "Air Frequency",
         juce::NormalisableRange<float>(8000.0f, 20000.0f, 1.0f, 0.5f), 12000.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq5Gain", "EQ5 Gain", -18.0f, 18.0f, 0.0f));
+        "eq8Gain", "Air Gain", -24.0f, 24.0f, 0.0f));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "eq5Q", "EQ5 Q", 0.1f, 10.0f, 1.0f));
+        "eq8Q", "Air Q", 0.1f, 10.0f, 0.7f));
 
     // Layer controls
     // Sub layer (low frequencies)
@@ -256,8 +284,6 @@ void GabbermasterAudioProcessor::changeProgramName (int index, const juce::Strin
 //==============================================================================
 void GabbermasterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    logMessage("prepareToPlay sampleRate=" + juce::String(sampleRate) +
-               " block=" + juce::String(samplesPerBlock));
     currentSampleRate = sampleRate;
 
     // Prepare DSP
@@ -364,6 +390,8 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     float resonance = apvts.getRawParameterValue("resonance")->load();
     float outputDb = apvts.getRawParameterValue("output")->load();
     float mix = apvts.getRawParameterValue("mix")->load() / 100.0f;
+    float trackAmount = apvts.getRawParameterValue("track")->load() / 100.0f;
+    int kickMode = (int)apvts.getRawParameterValue("kickMode")->load();
 
     // Get reverb parameters
     float roomSize = apvts.getRawParameterValue("room")->load();
@@ -373,7 +401,7 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // Set reverb parameters
     reverb.setParameters(roomSize, width, damping);
 
-    // Update EQ parameters
+    // Update EQ parameters (8 bands)
     for (int band = 0; band < ParametricEQ::numBands; ++band)
     {
         juce::String freqId = "eq" + juce::String(band + 1) + "Freq";
@@ -410,8 +438,46 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     outputGainSmoothed.setTargetValue(juce::Decibels::decibelsToGain(outputDb));
     mixSmoothed.setTargetValue(mix);
 
-    // Get envelope time scale (slow mode multiplies times by 4)
-    float timeScale = slowMode.load() ? 4.0f : 1.0f;
+    // Apply kick mode character adjustments
+    float modeBoost = 1.0f;
+    float modeSaturate = saturate;
+    switch (kickMode)
+    {
+        case 0: // Viper - punchy, aggressive
+            modeBoost = 1.2f;
+            modeSaturate = juce::jmin(100.0f, saturate + 20.0f);
+            break;
+        case 1: // Evil - dark, heavy distortion
+            modeBoost = 1.4f;
+            modeSaturate = juce::jmin(100.0f, saturate + 40.0f);
+            break;
+        case 2: // Hard - tight, compressed
+            modeBoost = 1.1f;
+            break;
+        case 3: // Soft - clean, natural
+            modeBoost = 0.9f;
+            modeSaturate = juce::jmax(0.0f, saturate - 20.0f);
+            break;
+        case 4: // Raw - unprocessed character
+            modeBoost = 1.0f;
+            modeSaturate = 0.0f;
+            break;
+        case 5: // Metal - harsh, industrial
+            modeBoost = 1.3f;
+            modeSaturate = juce::jmin(100.0f, saturate + 30.0f);
+            break;
+    }
+
+    // Get current note for tracking (use the most recent active voice)
+    int currentNote = 60; // Default to middle C
+    for (const auto& voice : voices)
+    {
+        if (voice.isActive)
+        {
+            currentNote = voice.noteNumber;
+            break;
+        }
+    }
 
     // Process each sample
     for (int i = 0; i < buffer.getNumSamples(); ++i)
@@ -425,30 +491,51 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         sampleL = layerOutL;
         sampleR = layerOutR;
 
+        // Apply mode boost
+        sampleL *= modeBoost;
+        sampleR *= modeBoost;
+
         // Apply distortion (Pre)
         float driveVal = driveSmoothed.getNextValue();
-        sampleL = distortion.processSample(sampleL, driveVal, distMode, bitCrush, saturate);
-        sampleR = distortion.processSample(sampleR, driveVal, distMode, bitCrush, saturate);
+        if (driveVal > 0.01f)
+        {
+            sampleL = distortion.processSample(sampleL, driveVal, distMode, bitCrush, modeSaturate);
+            sampleR = distortion.processSample(sampleR, driveVal, distMode, bitCrush, modeSaturate);
+        }
 
-        // Apply filters based on filter type
+        // Apply filter with keyboard tracking
+        float trackedHpf = hpf;
+        float trackedLpf = lpf;
+
+        if (trackAmount > 0.01f)
+        {
+            // Calculate pitch ratio from MIDI note (relative to C3 = 48)
+            float noteOffset = (currentNote - 48) / 12.0f; // Octaves from C3
+            float pitchRatio = std::pow(2.0f, noteOffset * trackAmount);
+
+            // Apply tracking to filter frequencies
+            trackedHpf = juce::jlimit(20.0f, 2000.0f, hpf * pitchRatio);
+            trackedLpf = juce::jlimit(200.0f, 20000.0f, lpf * pitchRatio);
+        }
+
         int filterType = currentFilterType.load();
-        if (filterType == 0) // HI (High Pass)
+        if (filterType == 0) // HP
         {
-            sampleL = filter.processSample(sampleL, hpf, 20000.0f, resonance);
-            sampleR = filter.processSample(sampleR, hpf, 20000.0f, resonance);
+            sampleL = filter.processSample(sampleL, trackedHpf, 20000.0f, resonance);
+            sampleR = filter.processSample(sampleR, trackedHpf, 20000.0f, resonance);
         }
-        else if (filterType == 1) // LO (Low Pass)
+        else if (filterType == 1) // LP
         {
-            sampleL = filter.processSample(sampleL, 20.0f, lpf, resonance);
-            sampleR = filter.processSample(sampleR, 20.0f, lpf, resonance);
+            sampleL = filter.processSample(sampleL, 20.0f, trackedLpf, resonance);
+            sampleR = filter.processSample(sampleR, 20.0f, trackedLpf, resonance);
         }
-        else // BP (Band Pass) - apply both
+        else // BP
         {
-            sampleL = filter.processSample(sampleL, hpf, lpf, resonance);
-            sampleR = filter.processSample(sampleR, hpf, lpf, resonance);
+            sampleL = filter.processSample(sampleL, trackedHpf, trackedLpf, resonance);
+            sampleR = filter.processSample(sampleR, trackedHpf, trackedLpf, resonance);
         }
 
-        // Apply parametric EQ
+        // Apply EQ
         parametricEQ.processStereo(sampleL, sampleR);
 
         // Apply reverb
@@ -457,90 +544,97 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             reverb.processStereo(sampleL, sampleR);
         }
 
-        // Apply output gain
-        float gain = outputGainSmoothed.getNextValue();
-        sampleL *= gain;
-        sampleR *= gain;
-
-        // Mix wet/dry
+        // Apply output gain and mix
+        float outGain = outputGainSmoothed.getNextValue();
         float mixVal = mixSmoothed.getNextValue();
-        channelDataL[i] = sampleL * mixVal + dryBuffer.getSample(0, i) * (1.0f - mixVal);
-        if (channelDataR)
-            channelDataR[i] = sampleR * mixVal + (dryBuffer.getNumChannels() > 1 ? dryBuffer.getSample(1, i) : dryBuffer.getSample(0, i)) * (1.0f - mixVal);
-    }
+        sampleL *= outGain * mixVal;
+        sampleR *= outGain * mixVal;
 
-    // Update layer levels for UI
-    subLevel.store(layerProcessor.getSubLevel());
-    bodyLevel.store(layerProcessor.getBodyLevel());
-    clickLevel.store(layerProcessor.getClickLevel());
+        // Update levels for UI
+        subLevel.store(layerProcessor.getSubLevel());
+        bodyLevel.store(layerProcessor.getBodyLevel());
+        clickLevel.store(layerProcessor.getClickLevel());
+
+        // Write output
+        channelDataL[i] = sampleL;
+        if (channelDataR)
+            channelDataR[i] = sampleR;
+    }
 }
 
+//==============================================================================
 void GabbermasterAudioProcessor::handleMidiEvent(const juce::MidiMessage& message)
 {
     if (message.isNoteOn())
     {
-        // Find free voice
-        if (auto* voice = findFreeVoice())
-        {
-            voice->isActive = true;
-            voice->noteNumber = message.getNoteNumber();
-            voice->velocity = message.getVelocity() / 127.0f;
-            voice->samplePosition = 0;
+        Voice* voice = findFreeVoice();
+        if (voice == nullptr)
+            voice = &voices[0]; // Steal oldest voice
 
-            // Get envelope time scale (slow mode multiplies times by 4)
-            float timeScale = slowMode.load() ? 4.0f : 1.0f;
+        voice->isActive = true;
+        voice->noteNumber = message.getNoteNumber();
+        voice->velocity = message.getFloatVelocity();
+        voice->samplePosition = 0;
 
-            // Set ADSR parameters
-            float attack = apvts.getRawParameterValue("attack")->load() / 1000.0f * timeScale;
-            float decay = apvts.getRawParameterValue("decay")->load() / 1000.0f * timeScale;
-            float sustain = apvts.getRawParameterValue("sustain")->load();
-            float release = apvts.getRawParameterValue("release")->load() / 1000.0f * timeScale;
+        // Calculate pitch ratio based on note
+        int baseNote = 60; // C4
+        float semitones = static_cast<float>(voice->noteNumber - baseNote);
+        voice->pitchRatio = std::pow(2.0f, semitones / 12.0f);
 
-            juce::ADSR::Parameters params;
-            params.attack = attack;
-            params.decay = decay;
-            params.sustain = sustain;
-            params.release = release;
+        // Setup envelope
+        float attack = apvts.getRawParameterValue("attack")->load();
+        float decay = apvts.getRawParameterValue("decay")->load();
+        float sustain = apvts.getRawParameterValue("sustain")->load();
+        float release = apvts.getRawParameterValue("release")->load();
 
-            voice->envelope.setParameters(params);
-            voice->envelope.noteOn();
+        float timeScale = slowMode.load() ? 4.0f : 1.0f;
 
-            // Set pitch envelope (fast attack, no sustain for pitch drop effect)
-            float pitchEnvAmount = apvts.getRawParameterValue("pitchEnv")->load();
-            voice->pitchEnvValue = pitchEnvAmount;
+        juce::ADSR::Parameters adsrParams;
+        adsrParams.attack = (attack * timeScale) / 1000.0f;
+        adsrParams.decay = (decay * timeScale) / 1000.0f;
+        adsrParams.sustain = sustain;
+        adsrParams.release = (release * timeScale) / 1000.0f;
 
-            juce::ADSR::Parameters pitchParams;
-            pitchParams.attack = 0.001f;
-            pitchParams.decay = 0.1f * timeScale;
-            pitchParams.sustain = 0.0f;
-            pitchParams.release = 0.01f;
+        voice->envelope.setParameters(adsrParams);
+        voice->envelope.noteOn();
 
-            voice->pitchEnvelope.setParameters(pitchParams);
-            voice->pitchEnvelope.noteOn();
+        // Setup pitch envelope
+        float pitchEnvAmount = apvts.getRawParameterValue("pitchEnv")->load();
+        voice->pitchEnvValue = pitchEnvAmount;
 
-            // Calculate pitch ratio based on MIDI note (middle C = 60 = original pitch)
-            voice->pitchRatio = std::pow(2.0f, (voice->noteNumber - 60) / 12.0f);
-        }
+        juce::ADSR::Parameters pitchEnvParams;
+        pitchEnvParams.attack = 0.001f;
+        pitchEnvParams.decay = 0.1f * timeScale;
+        pitchEnvParams.sustain = 0.0f;
+        pitchEnvParams.release = 0.05f;
+        voice->pitchEnvelope.setParameters(pitchEnvParams);
+        voice->pitchEnvelope.noteOn();
+
+        // Trigger layer envelope
+        layerProcessor.noteOn();
     }
     else if (message.isNoteOff())
     {
-        if (auto* voice = findVoiceForNote(message.getNoteNumber()))
+        Voice* voice = findVoiceForNote(message.getNoteNumber());
+        if (voice)
         {
             voice->envelope.noteOff();
             voice->pitchEnvelope.noteOff();
+            layerProcessor.noteOff();
         }
     }
 }
 
 void GabbermasterAudioProcessor::renderVoices(juce::AudioBuffer<float>& buffer, int numSamples)
 {
-    int presetIndex = (int)apvts.getRawParameterValue("preset")->load();
+    int presetIndex = static_cast<int>(apvts.getRawParameterValue("preset")->load());
     auto* sample = sampleManager.getSample(presetIndex);
 
-    if (!sample || sample->getNumSamples() == 0)
+    if (sample == nullptr || sample->getNumSamples() == 0)
         return;
 
-    float maxEnvValue = 0.0f;
+    const int sampleLength = sample->getNumSamples();
+    const float* sampleData = sample->getReadPointer(0);
 
     for (auto& voice : voices)
     {
@@ -549,52 +643,54 @@ void GabbermasterAudioProcessor::renderVoices(juce::AudioBuffer<float>& buffer, 
 
         for (int i = 0; i < numSamples; ++i)
         {
-            float envelopeValue = voice.envelope.getNextSample();
+            // Get envelope
+            float envValue = voice.envelope.getNextSample();
             float pitchEnvValue = voice.pitchEnvelope.getNextSample();
-
-            // Track envelope for UI
-            if (envelopeValue > maxEnvValue)
-                maxEnvValue = envelopeValue;
 
             if (!voice.envelope.isActive())
             {
-                voice.reset();
+                voice.isActive = false;
                 break;
             }
 
             // Calculate current pitch with envelope
-            float pitchMod = 1.0f + (voice.pitchEnvValue / 12.0f) * pitchEnvValue;
-            float currentPitch = voice.pitchRatio * pitchMod;
-
-            // Get sample position (with pitch shifting)
-            float floatPos = voice.samplePosition * currentPitch;
-            int intPos = static_cast<int>(floatPos);
-
-            if (intPos >= sample->getNumSamples() - 1)
+            float currentPitch = voice.pitchRatio;
+            if (voice.pitchEnvValue != 0.0f)
             {
-                voice.reset();
-                break;
+                float pitchMod = voice.pitchEnvValue * pitchEnvValue;
+                currentPitch *= std::pow(2.0f, pitchMod / 12.0f);
             }
 
-            // Linear interpolation for smoother pitch shifting
-            float frac = floatPos - intPos;
-            float sample1 = sample->getSample(0, intPos);
-            float sample2 = sample->getSample(0, juce::jmin(intPos + 1, sample->getNumSamples() - 1));
-            float sampleValue = sample1 + frac * (sample2 - sample1);
+            // Get sample value with interpolation
+            float sampleValue = 0.0f;
+            if (voice.samplePosition < sampleLength - 1)
+            {
+                int pos = static_cast<int>(voice.samplePosition);
+                float frac = voice.samplePosition - pos;
+                sampleValue = sampleData[pos] * (1.0f - frac) + sampleData[pos + 1] * frac;
+            }
 
-            sampleValue *= voice.velocity * envelopeValue;
+            // Apply envelope and velocity
+            sampleValue *= envValue * voice.velocity;
 
-            // Add to output buffer
+            // Store envelope value for UI
+            currentEnvelopeValue.store(envValue);
+
+            // Add to buffer (both channels)
             buffer.addSample(0, i, sampleValue);
             if (buffer.getNumChannels() > 1)
                 buffer.addSample(1, i, sampleValue);
 
-            voice.samplePosition++;
+            // Advance sample position
+            voice.samplePosition += currentPitch;
+
+            // Loop or stop at end
+            if (voice.samplePosition >= sampleLength)
+            {
+                voice.samplePosition = 0;
+            }
         }
     }
-
-    // Update envelope value for UI
-    currentEnvelopeValue.store(maxEnvValue);
 }
 
 GabbermasterAudioProcessor::Voice* GabbermasterAudioProcessor::findFreeVoice()
@@ -617,11 +713,6 @@ GabbermasterAudioProcessor::Voice* GabbermasterAudioProcessor::findVoiceForNote(
     return nullptr;
 }
 
-void GabbermasterAudioProcessor::loadCustomSample(const juce::File& file)
-{
-    sampleManager.loadCustomSample(file, formatManager);
-}
-
 //==============================================================================
 bool GabbermasterAudioProcessor::hasEditor() const
 {
@@ -637,17 +728,20 @@ juce::AudioProcessorEditor* GabbermasterAudioProcessor::createEditor()
 void GabbermasterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
-    std::unique_ptr<juce::XmlElement> xml (state.createXml());
-    copyXmlToBinary (*xml, destData);
+    std::unique_ptr<juce::XmlElement> xml(state.createXml());
+    copyXmlToBinary(*xml, destData);
 }
 
 void GabbermasterAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
+    std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
+    if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
+        apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+}
 
-    if (xmlState.get() != nullptr)
-        if (xmlState->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+void GabbermasterAudioProcessor::loadCustomSample(const juce::File& file)
+{
+    sampleManager.loadCustomSample(file, formatManager);
 }
 
 //==============================================================================

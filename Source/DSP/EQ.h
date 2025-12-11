@@ -7,7 +7,7 @@
 class ParametricEQ
 {
 public:
-    static constexpr int numBands = 5;
+    static constexpr int numBands = 8;
 
     ParametricEQ()
     {
@@ -159,8 +159,9 @@ public:
         return magnitude;
     }
 
-    // Default band frequencies
-    static constexpr std::array<float, numBands> defaultFrequencies = {80.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
+    // Default band frequencies for 8-band EQ
+    // Sub (40), Punch (80), Body (200), Low-Mid (500), Mid (1.2k), Click (3k), Presence (7k), Air (12k)
+    static constexpr std::array<float, numBands> defaultFrequencies = {40.0f, 80.0f, 200.0f, 500.0f, 1200.0f, 3000.0f, 7000.0f, 12000.0f};
 
 private:
     void updateBand(int bandIndex)
@@ -168,10 +169,14 @@ private:
         if (currentSampleRate <= 0)
             return;
 
+        // Clamp frequency to valid range
+        float freq = juce::jlimit(20.0f, static_cast<float>(currentSampleRate * 0.45), frequencies[bandIndex]);
+        float q = juce::jmax(0.1f, qValues[bandIndex]);
+
         auto coefficients = juce::dsp::IIR::Coefficients<float>::makePeakFilter(
             currentSampleRate,
-            frequencies[bandIndex],
-            qValues[bandIndex],
+            freq,
+            q,
             juce::Decibels::decibelsToGain(gains[bandIndex])
         );
 
@@ -186,7 +191,7 @@ private:
     std::array<juce::dsp::IIR::Filter<float>, numBands> bandsL;
     std::array<juce::dsp::IIR::Filter<float>, numBands> bandsR;
 
-    std::array<float, numBands> frequencies = {80.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
-    std::array<float, numBands> gains = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, numBands> qValues = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, numBands> frequencies = {40.0f, 80.0f, 200.0f, 500.0f, 1200.0f, 3000.0f, 7000.0f, 12000.0f};
+    std::array<float, numBands> gains = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, numBands> qValues = {0.7f, 1.0f, 1.0f, 1.0f, 1.0f, 1.5f, 1.0f, 0.7f};
 };

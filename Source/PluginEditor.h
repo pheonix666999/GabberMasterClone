@@ -356,6 +356,15 @@ private:
     juce::ToggleButton offButton;
     juce::ToggleButton onButton;
 
+    // Kick mode buttons
+    juce::ToggleButton viperButton;
+    juce::ToggleButton evilButton;
+    juce::ToggleButton hardButton;
+    juce::ToggleButton softButton;
+    juce::ToggleButton rawButton;
+    juce::ToggleButton metalButton;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> kickModeAttachment;
+
     // EQ Curve display
     std::unique_ptr<EQCurveComponent> eqCurve;
 

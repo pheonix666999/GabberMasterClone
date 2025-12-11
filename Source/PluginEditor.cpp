@@ -122,6 +122,37 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     addAndMakeVisible(onButton);
     logMessage("Editor: on/off buttons ready");
 
+    // Kick mode buttons (Viper, Evil, Hard, Soft, Raw, Metal)
+    auto setupKickModeButton = [this](juce::ToggleButton& button, const juce::String& name, int modeIndex) {
+        button.setButtonText(name);
+        button.setRadioGroupId(100); // Separate radio group for kick modes
+        button.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+        button.setColour(juce::ToggleButton::tickColourId, juce::Colour(0xffcc0000));
+        button.onClick = [this, modeIndex, &button]() {
+            if (auto* param = audioProcessor.getAPVTS().getParameter("kickMode"))
+            {
+                param->setValueNotifyingHost(static_cast<float>(modeIndex) / 5.0f);
+            }
+            // Update all buttons
+            viperButton.setToggleState(modeIndex == 0, juce::dontSendNotification);
+            evilButton.setToggleState(modeIndex == 1, juce::dontSendNotification);
+            hardButton.setToggleState(modeIndex == 2, juce::dontSendNotification);
+            softButton.setToggleState(modeIndex == 3, juce::dontSendNotification);
+            rawButton.setToggleState(modeIndex == 4, juce::dontSendNotification);
+            metalButton.setToggleState(modeIndex == 5, juce::dontSendNotification);
+        };
+        addAndMakeVisible(button);
+    };
+
+    setupKickModeButton(viperButton, "Viper", 0);
+    setupKickModeButton(evilButton, "Evil", 1);
+    setupKickModeButton(hardButton, "Hard", 2);
+    setupKickModeButton(softButton, "Soft", 3);
+    setupKickModeButton(rawButton, "Raw", 4);
+    setupKickModeButton(metalButton, "Metal", 5);
+    viperButton.setToggleState(true, juce::dontSendNotification); // Default to Viper
+    logMessage("Editor: kick mode buttons ready");
+
     // Row 1 - Envelope section (5 knobs): Attack, Decay, Release, Sustain, Volume
     setupRotarySlider(attackKnob, " ms");
     attackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -162,9 +193,9 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     qAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "resonance", qKnob);
 
-    setupRotarySlider(trackKnob, "");
+    setupRotarySlider(trackKnob, "%");
     trackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.getAPVTS(), "hpf", trackKnob);
+        audioProcessor.getAPVTS(), "track", trackKnob);
 
     setupRotarySlider(envKnob, "");
     envAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -309,10 +340,10 @@ void GabbermasterAudioProcessorEditor::paint (juce::Graphics& g)
         }
     }
 
-    // "Viper" label above waveform
-    g.setColour(juce::Colours::white);
-    g.setFont(juce::FontOptions(11.0f));
-    g.drawText("Viper", waveformBounds.getRight() - 40, waveformBounds.getY() - 2, 40, 14, juce::Justification::right);
+    // "KICK MODE" label above kick mode buttons
+    g.setColour(juce::Colour(0xffcc0000));
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText("KICK MODE", 550, 58, 120, 14, juce::Justification::left);
 
     // "GABBER MASTER!" title - red gothic style
     g.setColour(juce::Colour(0xffcc0000));
@@ -521,6 +552,19 @@ void GabbermasterAudioProcessorEditor::resized()
     offButton.setBounds(180, 540, 60, 24);
     onButton.setBounds(250, 540, 60, 24);
 
+    // Kick mode buttons (top row, after title)
+    int kickModeY = 75;
+    int kickModeX = 550;
+    int kickBtnWidth = 55;
+    int kickBtnHeight = 20;
+    int kickBtnSpacing = 4;
+    viperButton.setBounds(kickModeX, kickModeY, kickBtnWidth, kickBtnHeight);
+    evilButton.setBounds(kickModeX + kickBtnWidth + kickBtnSpacing, kickModeY, kickBtnWidth, kickBtnHeight);
+    hardButton.setBounds(kickModeX + (kickBtnWidth + kickBtnSpacing) * 2, kickModeY, kickBtnWidth, kickBtnHeight);
+    softButton.setBounds(kickModeX, kickModeY + kickBtnHeight + 3, kickBtnWidth, kickBtnHeight);
+    rawButton.setBounds(kickModeX + kickBtnWidth + kickBtnSpacing, kickModeY + kickBtnHeight + 3, kickBtnWidth, kickBtnHeight);
+    metalButton.setBounds(kickModeX + (kickBtnWidth + kickBtnSpacing) * 2, kickModeY + kickBtnHeight + 3, kickBtnWidth, kickBtnHeight);
+
     // EQ Curve display (right side, large)
     if (eqCurve != nullptr)
         eqCurve->setBounds(360, 320, 475, 140);
@@ -564,6 +608,18 @@ void GabbermasterAudioProcessorEditor::timerCallback()
     bool bypassed = audioProcessor.isEffectsBypassed();
     offButton.setToggleState(bypassed, juce::dontSendNotification);
     onButton.setToggleState(!bypassed, juce::dontSendNotification);
+
+    // Sync kick mode buttons
+    if (auto* kickModeParam = audioProcessor.getAPVTS().getRawParameterValue("kickMode"))
+    {
+        int currentKickMode = static_cast<int>(kickModeParam->load());
+        viperButton.setToggleState(currentKickMode == 0, juce::dontSendNotification);
+        evilButton.setToggleState(currentKickMode == 1, juce::dontSendNotification);
+        hardButton.setToggleState(currentKickMode == 2, juce::dontSendNotification);
+        softButton.setToggleState(currentKickMode == 3, juce::dontSendNotification);
+        rawButton.setToggleState(currentKickMode == 4, juce::dontSendNotification);
+        metalButton.setToggleState(currentKickMode == 5, juce::dontSendNotification);
+    }
 
     repaint();
 }
