@@ -159,10 +159,6 @@ public:
         return magnitude;
     }
 
-    // Default band frequencies for 8-band EQ
-    // Sub (40), Punch (80), Body (200), Low-Mid (500), Mid (1.2k), Click (3k), Presence (7k), Air (12k)
-    static constexpr std::array<float, numBands> defaultFrequencies = {40.0f, 80.0f, 200.0f, 500.0f, 1200.0f, 3000.0f, 7000.0f, 12000.0f};
-
 private:
     void updateBand(int bandIndex)
     {
