@@ -6,6 +6,7 @@
 #include "DSP/Filter.h"
 #include "DSP/Reverb.h"
 #include "DSP/EQ.h"
+#include "DSP/CurveEQ.h"
 #include "DSP/LayerProcessor.h"
 
 //==============================================================================
@@ -71,6 +72,8 @@ public:
     // EQ access for UI drawing
     ParametricEQ& getEQ() { return parametricEQ; }
     const ParametricEQ& getEQ() const { return parametricEQ; }
+    CurveEQ& getCurveEQ() { return curveEQ; }
+    const CurveEQ& getCurveEQ() const { return curveEQ; }
 
     // Layer levels for UI
     float getSubLevel() const { return subLevel.load(); }
@@ -91,7 +94,8 @@ private:
     Distortion distortion;
     Filter filter;
     Reverb reverb;
-    ParametricEQ parametricEQ;
+    ParametricEQ parametricEQ; // Keep for backward compatibility
+    CurveEQ curveEQ; // New curve-based EQ
     LayerProcessor layerProcessor;
 
     // ADSR Envelope
@@ -109,6 +113,16 @@ private:
         float pitchEnvValue = 0.0f;
         juce::ADSR envelope;
         juce::ADSR pitchEnvelope;
+        
+        // Oscillator state for algorithmic generation
+        float phase = 0.0f;
+        float phase2 = 0.0f; // For detuned sub-oscillators
+        float phase3 = 0.0f;
+        float noiseState = 0.0f;
+        float startPitch = 0.0f;
+        float endPitch = 0.0f;
+        int mode = 0;
+        float harmonicMix = 0.0f;
 
         void reset()
         {
@@ -120,6 +134,14 @@ private:
             pitchEnvValue = 0.0f;
             envelope.reset();
             pitchEnvelope.reset();
+            phase = 0.0f;
+            phase2 = 0.0f;
+            phase3 = 0.0f;
+            noiseState = 0.0f;
+            startPitch = 0.0f;
+            endPitch = 0.0f;
+            mode = 0;
+            harmonicMix = 0.0f;
         }
     };
 
@@ -139,6 +161,7 @@ private:
     std::atomic<int> currentFilterType{1}; // 0=HP, 1=LP, 2=BP
     std::atomic<bool> slowMode{false};
     std::atomic<bool> effectsBypassed{false};
+    std::atomic<int> distortionPosition{1}; // 0=Pre, 1=Post, 2=Both
 
     // Layer level metering (for UI visualization)
     std::atomic<float> subLevel{0.0f};
@@ -150,6 +173,10 @@ private:
     void renderVoices(juce::AudioBuffer<float>& buffer, int numSamples);
     Voice* findFreeVoice();
     Voice* findVoiceForNote(int noteNumber);
+    
+    // Mode-based waveform generation
+    float generateWaveformSample(Voice& voice, float time, float currentPitch, int mode);
+    void getModeParameters(int mode, float& startPitch, float& endPitch, float& detune1, float& detune2, float& harmonicMix);
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GabbermasterAudioProcessor)

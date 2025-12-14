@@ -341,6 +341,10 @@ private:
 
     // Filter type selector
     juce::ComboBox filterTypeSelector;
+    
+    // Pre/Post distortion selector
+    juce::ComboBox distPositionSelector;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> distPositionAttachment;
 
     // Additional controls
     juce::TextButton goButton;

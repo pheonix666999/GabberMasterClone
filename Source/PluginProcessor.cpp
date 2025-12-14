@@ -66,6 +66,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout GabbermasterAudioProcessor::
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "saturate", "Saturate", 0.0f, 100.0f, 0.0f));
 
+    // Pre/Post distortion position
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        "distPosition", "Distortion Position",
+        juce::StringArray{"Pre", "Post", "Both"}, 1));
+
     // Filter section
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "hpf", "High Pass", 20.0f, 2000.0f, 20.0f));
@@ -79,9 +84,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout GabbermasterAudioProcessor::
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         "filterEnv", "Filter Envelope", 0.0f, 1.0f, 0.0f));
 
-    // Track knob - keyboard tracking for filter
+    // Track knob - tonal/pitch tuning (-12 to +12 semitones)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        "track", "Track", 0.0f, 100.0f, 0.0f));
+        "track", "Track", -12.0f, 12.0f, 0.0f));
 
     // Envelope section
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -291,6 +296,8 @@ void GabbermasterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     filter.prepare(sampleRate, samplesPerBlock);
     reverb.prepare(sampleRate, samplesPerBlock);
     parametricEQ.prepare(sampleRate, samplesPerBlock);
+    curveEQ.prepare(sampleRate, samplesPerBlock);
+    curveEQ.setCurveTemplate(CurveEQ::CurveTemplate::PunchBoost); // Default to punch boost
     layerProcessor.prepare(sampleRate, samplesPerBlock);
 
     // Reset smoothed values
@@ -385,13 +392,16 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     int distMode = (int)apvts.getRawParameterValue("distMode")->load();
     float bitCrush = apvts.getRawParameterValue("bitCrush")->load();
     float saturate = apvts.getRawParameterValue("saturate")->load();
+    int distPosition = (int)apvts.getRawParameterValue("distPosition")->load(); // 0=Pre, 1=Post, 2=Both
     float hpf = apvts.getRawParameterValue("hpf")->load();
     float lpf = apvts.getRawParameterValue("lpf")->load();
     float resonance = apvts.getRawParameterValue("resonance")->load();
     float outputDb = apvts.getRawParameterValue("output")->load();
     float mix = apvts.getRawParameterValue("mix")->load() / 100.0f;
-    float trackAmount = apvts.getRawParameterValue("track")->load() / 100.0f;
     int kickMode = (int)apvts.getRawParameterValue("kickMode")->load();
+    
+    // Store distortion position for processing
+    distortionPosition.store(distPosition);
 
     // Get reverb parameters
     float roomSize = apvts.getRawParameterValue("room")->load();
@@ -438,45 +448,25 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     outputGainSmoothed.setTargetValue(juce::Decibels::decibelsToGain(outputDb));
     mixSmoothed.setTargetValue(mix);
 
-    // Apply kick mode character adjustments
-    float modeBoost = 1.0f;
+    // Mode-specific saturation adjustment
     float modeSaturate = saturate;
     switch (kickMode)
     {
-        case 0: // Viper - punchy, aggressive
-            modeBoost = 1.2f;
+        case 0: // Viper - more saturation
             modeSaturate = juce::jmin(100.0f, saturate + 20.0f);
             break;
-        case 1: // Evil - dark, heavy distortion
-            modeBoost = 1.4f;
+        case 1: // Evil - heavy saturation
             modeSaturate = juce::jmin(100.0f, saturate + 40.0f);
             break;
-        case 2: // Hard - tight, compressed
-            modeBoost = 1.1f;
-            break;
-        case 3: // Soft - clean, natural
-            modeBoost = 0.9f;
+        case 3: // Soft - less saturation
             modeSaturate = juce::jmax(0.0f, saturate - 20.0f);
             break;
-        case 4: // Raw - unprocessed character
-            modeBoost = 1.0f;
+        case 4: // Raw - no saturation
             modeSaturate = 0.0f;
             break;
-        case 5: // Metal - harsh, industrial
-            modeBoost = 1.3f;
+        case 5: // Metal - more saturation
             modeSaturate = juce::jmin(100.0f, saturate + 30.0f);
             break;
-    }
-
-    // Get current note for tracking (use the most recent active voice)
-    int currentNote = 60; // Default to middle C
-    for (const auto& voice : voices)
-    {
-        if (voice.isActive)
-        {
-            currentNote = voice.noteNumber;
-            break;
-        }
     }
 
     // Process each sample
@@ -491,32 +481,35 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         sampleL = layerOutL;
         sampleR = layerOutR;
 
-        // Apply mode boost
-        sampleL *= modeBoost;
-        sampleR *= modeBoost;
+        // Store dry signal for parallel processing
+        float dryL = sampleL;
+        float dryR = sampleR;
 
-        // Apply distortion (Pre)
+        // Apply Pre distortion (before EQ)
         float driveVal = driveSmoothed.getNextValue();
-        if (driveVal > 0.01f)
+        float preDistL = sampleL;
+        float preDistR = sampleR;
+        if ((distPosition == 0 || distPosition == 2) && driveVal > 0.01f)
         {
-            sampleL = distortion.processSample(sampleL, driveVal, distMode, bitCrush, modeSaturate);
-            sampleR = distortion.processSample(sampleR, driveVal, distMode, bitCrush, modeSaturate);
+            preDistL = distortion.processSample(sampleL, driveVal, distMode, bitCrush, modeSaturate);
+            preDistR = distortion.processSample(sampleR, driveVal, distMode, bitCrush, modeSaturate);
+        }
+        
+        // Use pre-distorted signal if in Pre or Both mode
+        if (distPosition == 0) // Pre only
+        {
+            sampleL = preDistL;
+            sampleR = preDistR;
+        }
+        else if (distPosition == 2) // Both - blend
+        {
+            sampleL = preDistL * 0.5f + dryL * 0.5f;
+            sampleR = preDistR * 0.5f + dryR * 0.5f;
         }
 
-        // Apply filter with keyboard tracking
+        // Apply filter (track knob now affects pitch in renderVoices, not filter)
         float trackedHpf = hpf;
         float trackedLpf = lpf;
-
-        if (trackAmount > 0.01f)
-        {
-            // Calculate pitch ratio from MIDI note (relative to C3 = 48)
-            float noteOffset = (currentNote - 48) / 12.0f; // Octaves from C3
-            float pitchRatio = std::pow(2.0f, noteOffset * trackAmount);
-
-            // Apply tracking to filter frequencies
-            trackedHpf = juce::jlimit(20.0f, 2000.0f, hpf * pitchRatio);
-            trackedLpf = juce::jlimit(200.0f, 20000.0f, lpf * pitchRatio);
-        }
 
         int filterType = currentFilterType.load();
         if (filterType == 0) // HP
@@ -535,8 +528,32 @@ void GabbermasterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             sampleR = filter.processSample(sampleR, trackedHpf, trackedLpf, resonance);
         }
 
-        // Apply EQ
-        parametricEQ.processStereo(sampleL, sampleR);
+        // Apply curve-based EQ (time-dependent)
+        curveEQ.processStereo(sampleL, sampleR);
+        
+        // Also apply parametric EQ for fine-tuning (optional, can be disabled)
+        // parametricEQ.processStereo(sampleL, sampleR);
+
+        // Apply Post distortion (after EQ)
+        if (distPosition == 1 || distPosition == 2) // Post or Both
+        {
+            if (driveVal > 0.01f)
+            {
+                float postDistL = distortion.processSample(sampleL, driveVal, distMode, bitCrush, modeSaturate);
+                float postDistR = distortion.processSample(sampleR, driveVal, distMode, bitCrush, modeSaturate);
+                
+                if (distPosition == 1) // Post only
+                {
+                    sampleL = postDistL;
+                    sampleR = postDistR;
+                }
+                else // Both - blend pre and post
+                {
+                    sampleL = preDistL * 0.3f + postDistL * 0.7f;
+                    sampleR = preDistR * 0.3f + postDistR * 0.7f;
+                }
+            }
+        }
 
         // Apply reverb
         if (roomSize > 0.01f)
@@ -575,6 +592,21 @@ void GabbermasterAudioProcessor::handleMidiEvent(const juce::MidiMessage& messag
         voice->noteNumber = message.getNoteNumber();
         voice->velocity = message.getFloatVelocity();
         voice->samplePosition = 0;
+        
+        // Reset oscillator phases
+        voice->phase = 0.0f;
+        voice->phase2 = 0.0f;
+        voice->phase3 = 0.0f;
+        voice->noiseState = 0.0f;
+
+        // Get current mode and initialize mode parameters
+        int kickMode = static_cast<int>(apvts.getRawParameterValue("kickMode")->load());
+        float modeStartPitch, modeEndPitch, detune1, detune2, harmonicMix;
+        getModeParameters(kickMode, modeStartPitch, modeEndPitch, detune1, detune2, harmonicMix);
+        voice->mode = kickMode;
+        voice->startPitch = modeStartPitch;
+        voice->endPitch = modeEndPitch;
+        voice->harmonicMix = harmonicMix;
 
         // Calculate pitch ratio based on note
         int baseNote = 60; // C4
@@ -598,15 +630,15 @@ void GabbermasterAudioProcessor::handleMidiEvent(const juce::MidiMessage& messag
         voice->envelope.setParameters(adsrParams);
         voice->envelope.noteOn();
 
-        // Setup pitch envelope
+        // Setup pitch envelope - more aggressive for classic gabber pitch drop
         float pitchEnvAmount = apvts.getRawParameterValue("pitchEnv")->load();
         voice->pitchEnvValue = pitchEnvAmount;
 
         juce::ADSR::Parameters pitchEnvParams;
-        pitchEnvParams.attack = 0.001f;
-        pitchEnvParams.decay = 0.1f * timeScale;
+        pitchEnvParams.attack = 0.0005f; // Faster attack for sharper drop
+        pitchEnvParams.decay = juce::jmax(0.05f, (decay * timeScale) / 1000.0f * 0.5f); // Match decay time but faster
         pitchEnvParams.sustain = 0.0f;
-        pitchEnvParams.release = 0.05f;
+        pitchEnvParams.release = 0.02f; // Quick release
         voice->pitchEnvelope.setParameters(pitchEnvParams);
         voice->pitchEnvelope.noteOn();
 
@@ -625,21 +657,181 @@ void GabbermasterAudioProcessor::handleMidiEvent(const juce::MidiMessage& messag
     }
 }
 
+void GabbermasterAudioProcessor::getModeParameters(int mode, float& startPitch, float& endPitch, float& detune1, float& detune2, float& harmonicMix)
+{
+    switch (mode)
+    {
+        case 0: // Viper - sawtooth-like harmonics, bright attack
+            startPitch = 180.0f; // Hz
+            endPitch = 50.0f;
+            detune1 = 1.05f; // +5% detune
+            detune2 = 0.97f; // -3% detune
+            harmonicMix = 0.4f; // Strong harmonics
+            break;
+        case 1: // Evil - sine-sub with detuned layers
+            startPitch = 50.0f;
+            endPitch = 35.0f;
+            detune1 = 1.02f;
+            detune2 = 0.98f;
+            harmonicMix = 0.2f; // Subtle harmonics
+            break;
+        case 2: // Hard - triangle base, tight
+            startPitch = 120.0f;
+            endPitch = 60.0f;
+            detune1 = 1.01f;
+            detune2 = 0.99f;
+            harmonicMix = 0.3f;
+            break;
+        case 3: // Soft - clean, natural
+            startPitch = 100.0f;
+            endPitch = 55.0f;
+            detune1 = 1.0f;
+            detune2 = 1.0f;
+            harmonicMix = 0.1f;
+            break;
+        case 4: // Raw - unprocessed character
+            startPitch = 80.0f;
+            endPitch = 45.0f;
+            detune1 = 1.0f;
+            detune2 = 1.0f;
+            harmonicMix = 0.0f;
+            break;
+        case 5: // Metal - harsh, industrial
+            startPitch = 200.0f;
+            endPitch = 65.0f;
+            detune1 = 1.08f;
+            detune2 = 0.92f;
+            harmonicMix = 0.5f;
+            break;
+        default:
+            startPitch = 100.0f;
+            endPitch = 50.0f;
+            detune1 = 1.0f;
+            detune2 = 1.0f;
+            harmonicMix = 0.2f;
+            break;
+    }
+}
+
+float GabbermasterAudioProcessor::generateWaveformSample(Voice& voice, float time, float currentPitch, int mode)
+{
+    float sample = 0.0f;
+    float phaseInc = currentPitch / static_cast<float>(currentSampleRate);
+    
+    switch (mode)
+    {
+        case 0: // Viper - sawtooth with harmonics for punch and click
+        {
+            // Main sawtooth - strong mid-range punch (200-400Hz)
+            float saw = 2.0f * (voice.phase - 0.5f);
+            sample = saw * 1.2f; // Boost for punch
+            
+            // Add detuned sub-oscillators for grit and body
+            float saw2 = 2.0f * (voice.phase2 - 0.5f);
+            float saw3 = 2.0f * (voice.phase3 - 0.5f);
+            sample += saw2 * 0.4f * voice.harmonicMix;
+            sample += saw3 * 0.3f * voice.harmonicMix;
+            
+            // Add high-frequency harmonics for click (>8kHz content)
+            float saw4 = 2.0f * ((voice.phase * 8.0f) - 0.5f); // 8x harmonic
+            float saw5 = 2.0f * ((voice.phase * 16.0f) - 0.5f); // 16x harmonic
+            sample += saw4 * 0.15f * (1.0f - time * 10.0f); // Decay quickly
+            sample += saw5 * 0.1f * (1.0f - time * 20.0f);
+            
+            // Add sharp click transient (noise burst at start)
+            if (time < 0.003f)
+            {
+                voice.noiseState = voice.noiseState * 0.85f + (juce::Random::getSystemRandom().nextFloat() * 2.0f - 1.0f) * 0.15f;
+                float clickEnv = 1.0f - (time / 0.003f);
+                sample += voice.noiseState * clickEnv * 0.6f; // Stronger click
+            }
+            break;
+        }
+        case 1: // Evil - sine-sub with detuned layers for deep body
+        {
+            // Strong sub-bass body (40-80Hz)
+            float sine = std::sin(voice.phase * juce::MathConstants<float>::twoPi);
+            float sine2 = std::sin(voice.phase2 * juce::MathConstants<float>::twoPi);
+            float sine3 = std::sin(voice.phase3 * juce::MathConstants<float>::twoPi);
+            sample = sine * 1.3f + sine2 * 0.6f + sine3 * 0.4f; // Boost for body
+            
+            // Add subtle punch in mids
+            float sine4 = std::sin(voice.phase * juce::MathConstants<float>::twoPi * 4.0f);
+            sample += sine4 * 0.2f * (1.0f - time * 2.0f);
+            
+            // Minimal click for dark character
+            if (time < 0.002f)
+            {
+                voice.noiseState = voice.noiseState * 0.9f + (juce::Random::getSystemRandom().nextFloat() * 2.0f - 1.0f) * 0.1f;
+                sample += voice.noiseState * (1.0f - time / 0.002f) * 0.2f;
+            }
+            break;
+        }
+        case 2: // Hard - triangle with tight punch
+        {
+            float tri = 4.0f * std::abs(voice.phase - 0.5f) - 1.0f;
+            sample = tri * 1.1f; // Boost for tight punch
+            // Add harmonics for definition
+            float tri2 = 4.0f * std::abs(voice.phase2 - 0.5f) - 1.0f;
+            float tri3 = 4.0f * std::abs((voice.phase * 3.0f) - 0.5f) - 1.0f;
+            sample += tri2 * 0.3f * voice.harmonicMix;
+            sample += tri3 * 0.15f * (1.0f - time * 5.0f); // Quick decay for click
+            break;
+        }
+        case 3: // Soft - clean sine
+        {
+            sample = std::sin(voice.phase * juce::MathConstants<float>::twoPi);
+            break;
+        }
+        case 4: // Raw - basic sine
+        {
+            sample = std::sin(voice.phase * juce::MathConstants<float>::twoPi);
+            break;
+        }
+        case 5: // Metal - square with PWM for harsh industrial sound
+        {
+            float square = (voice.phase < 0.5f) ? 1.0f : -1.0f;
+            sample = square * 1.2f; // Aggressive
+            // Add strong harmonics for harshness
+            float square2 = (voice.phase2 < 0.5f) ? 1.0f : -1.0f;
+            float square3 = (voice.phase3 < 0.5f) ? 1.0f : -1.0f;
+            float square4 = ((voice.phase * 5.0f) < 0.5f) ? 1.0f : -1.0f; // High harmonic
+            sample += square2 * 0.4f * voice.harmonicMix;
+            sample += square3 * 0.3f * voice.harmonicMix;
+            sample += square4 * 0.2f * (1.0f - time * 8.0f); // Sharp click
+            break;
+        }
+        default:
+            sample = std::sin(voice.phase * juce::MathConstants<float>::twoPi);
+            break;
+    }
+    
+    return sample;
+}
+
 void GabbermasterAudioProcessor::renderVoices(juce::AudioBuffer<float>& buffer, int numSamples)
 {
-    int presetIndex = static_cast<int>(apvts.getRawParameterValue("preset")->load());
-    auto* sample = sampleManager.getSample(presetIndex);
-
-    if (sample == nullptr || sample->getNumSamples() == 0)
-        return;
-
-    const int sampleLength = sample->getNumSamples();
-    const float* sampleData = sample->getReadPointer(0);
+    int kickMode = static_cast<int>(apvts.getRawParameterValue("kickMode")->load());
+    float trackAmount = apvts.getRawParameterValue("track")->load(); // -12 to +12 semitones
+    
+    // Get mode parameters
+    float modeStartPitch, modeEndPitch, detune1, detune2, harmonicMix;
+    getModeParameters(kickMode, modeStartPitch, modeEndPitch, detune1, detune2, harmonicMix);
 
     for (auto& voice : voices)
     {
         if (!voice.isActive)
             continue;
+
+        // Initialize mode parameters if not set
+        if (voice.mode != kickMode)
+        {
+            voice.mode = kickMode;
+            voice.harmonicMix = harmonicMix;
+        }
+
+        float timeSinceNoteOn = 0.0f;
+        float timeStep = 1.0f / static_cast<float>(currentSampleRate);
 
         for (int i = 0; i < numSamples; ++i)
         {
@@ -653,22 +845,35 @@ void GabbermasterAudioProcessor::renderVoices(juce::AudioBuffer<float>& buffer, 
                 break;
             }
 
-            // Calculate current pitch with envelope
-            float currentPitch = voice.pitchRatio;
-            if (voice.pitchEnvValue != 0.0f)
+            // Calculate pitch envelope (from start to end pitch)
+            float pitchEnvProgress = 1.0f - pitchEnvValue; // 1.0 at start, 0.0 at end
+            float currentPitchHz = modeStartPitch + (modeEndPitch - modeStartPitch) * (1.0f - pitchEnvProgress);
+            
+            // Apply Track knob - scales entire pitch envelope (STRONG EFFECT)
+            if (std::abs(trackAmount) > 0.01f)
             {
-                float pitchMod = voice.pitchEnvValue * pitchEnvValue;
-                currentPitch *= std::pow(2.0f, pitchMod / 12.0f);
+                float trackRatio = std::pow(2.0f, trackAmount / 12.0f);
+                currentPitchHz *= trackRatio;
+                
+                // Add micro-detune for chorusing effect (stronger)
+                float microDetune = trackAmount * 0.01f; // 10 cents per semitone - MORE AUDIBLE
+                currentPitchHz *= (1.0f + microDetune);
+                
+                // Also affect harmonic content - higher track = brighter
+                if (trackAmount > 0.0f)
+                {
+                    float harmonicBoost = 1.0f + (trackAmount / 12.0f) * 0.5f; // Up to 50% more harmonics
+                    // This will be applied in waveform generation
+                }
             }
+            
+            // Convert to phase increments
+            float phaseInc = currentPitchHz / static_cast<float>(currentSampleRate);
+            float phaseInc2 = currentPitchHz * detune1 / static_cast<float>(currentSampleRate);
+            float phaseInc3 = currentPitchHz * detune2 / static_cast<float>(currentSampleRate);
 
-            // Get sample value with interpolation
-            float sampleValue = 0.0f;
-            if (voice.samplePosition < sampleLength - 1)
-            {
-                int pos = static_cast<int>(voice.samplePosition);
-                float frac = voice.samplePosition - pos;
-                sampleValue = sampleData[pos] * (1.0f - frac) + sampleData[pos + 1] * frac;
-            }
+            // Generate waveform sample
+            float sampleValue = generateWaveformSample(voice, timeSinceNoteOn, currentPitchHz, kickMode);
 
             // Apply envelope and velocity
             sampleValue *= envValue * voice.velocity;
@@ -681,14 +886,17 @@ void GabbermasterAudioProcessor::renderVoices(juce::AudioBuffer<float>& buffer, 
             if (buffer.getNumChannels() > 1)
                 buffer.addSample(1, i, sampleValue);
 
-            // Advance sample position
-            voice.samplePosition += currentPitch;
+            // Advance phases
+            voice.phase += phaseInc;
+            if (voice.phase >= 1.0f) voice.phase -= 1.0f;
+            
+            voice.phase2 += phaseInc2;
+            if (voice.phase2 >= 1.0f) voice.phase2 -= 1.0f;
+            
+            voice.phase3 += phaseInc3;
+            if (voice.phase3 >= 1.0f) voice.phase3 -= 1.0f;
 
-            // Loop or stop at end
-            if (voice.samplePosition >= sampleLength)
-            {
-                voice.samplePosition = 0;
-            }
+            timeSinceNoteOn += timeStep;
         }
     }
 }

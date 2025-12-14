@@ -76,6 +76,19 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     addAndMakeVisible(filterTypeSelector);
     logMessage("Editor: filter type selector ready");
 
+    // Pre/Post distortion selector
+    distPositionSelector.addItem("Pre", 1);
+    distPositionSelector.addItem("Post", 2);
+    distPositionSelector.addItem("Both", 3);
+    distPositionSelector.setSelectedId(2); // Default to Post
+    distPositionSelector.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff1a1a1a));
+    distPositionSelector.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff444444));
+    distPositionSelector.setColour(juce::ComboBox::textColourId, juce::Colours::white);
+    addAndMakeVisible(distPositionSelector);
+    distPositionAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.getAPVTS(), "distPosition", distPositionSelector);
+    logMessage("Editor: Pre/Post selector ready");
+
     // SLOW/FAST radio buttons
     slowButton.setButtonText("SLOW");
     slowButton.setRadioGroupId(1);
@@ -264,7 +277,9 @@ GabbermasterAudioProcessorEditor::GabbermasterAudioProcessorEditor (Gabbermaster
     clickDecayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "clickDecay", clickDecayKnob);
 
-    setSize (850, 580);
+    setSize (1400, 900);
+    setResizable(true, true);
+    setResizeLimits(1200, 750, 2000, 1200);
     logMessage("Editor: after setSize");
     startTimer(50);
     logMessage("Editor ctor end");
@@ -286,8 +301,13 @@ void GabbermasterAudioProcessorEditor::paint (juce::Graphics& g)
     g.setGradientFill(redGlow);
     g.fillAll();
 
-    // Waveform display area (top left)
-    auto waveformBounds = juce::Rectangle<int>(12, 12, 180, 70);
+    // Scale factors based on default size (1400x900)
+    float scaleX = getWidth() / 1400.0f;
+    float scaleY = getHeight() / 900.0f;
+
+    // Waveform display area (top left, below title) - responsive
+    auto waveformBounds = juce::Rectangle<int>(static_cast<int>(20 * scaleX), static_cast<int>(100 * scaleY), 
+                                                static_cast<int>(280 * scaleX), static_cast<int>(100 * scaleY));
     g.setColour(juce::Colour(0xff080808));
     g.fillRect(waveformBounds);
     g.setColour(juce::Colour(0xff333333));
@@ -340,18 +360,21 @@ void GabbermasterAudioProcessorEditor::paint (juce::Graphics& g)
         }
     }
 
-    // "KICK MODE" label above kick mode buttons
+    // "KICK MODE" label above kick mode buttons - responsive
     g.setColour(juce::Colour(0xffcc0000));
-    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.drawText("KICK MODE", 550, 58, 120, 14, juce::Justification::left);
+    g.setFont(juce::FontOptions(16.0f * juce::jmin(scaleX, scaleY), juce::Font::bold));
+    g.drawText("KICK MODE", static_cast<int>(900 * scaleX), static_cast<int>(195 * scaleY), 
+               static_cast<int>(220 * scaleX), static_cast<int>(24 * scaleY), juce::Justification::left);
 
-    // "GABBER MASTER!" title - red gothic style
+    // "GABBER MASTER!" title - red gothic style (top left, responsive)
     g.setColour(juce::Colour(0xffcc0000));
-    g.setFont(juce::FontOptions(44.0f, juce::Font::bold));
-    g.drawText("GABBER MASTER!", 195, 8, 350, 60, juce::Justification::centred);
+    g.setFont(juce::FontOptions(48.0f * juce::jmin(scaleX, scaleY), juce::Font::bold));
+    g.drawText("GABBER MASTER!", static_cast<int>(20 * scaleX), static_cast<int>(20 * scaleY), 
+               static_cast<int>(600 * scaleX), static_cast<int>(60 * scaleY), juce::Justification::left);
 
-    // Envelope display area (bottom right) - larger area
-    auto envBounds = juce::Rectangle<int>(360, 220, 375, 145);
+    // Envelope display area (middle right, above EQ) - responsive
+    auto envBounds = juce::Rectangle<int>(static_cast<int>(900 * scaleX), static_cast<int>(300 * scaleY), 
+                                          static_cast<int>(480 * scaleX), static_cast<int>(180 * scaleY));
     g.setColour(juce::Colour(0xff080808));
     g.fillRect(envBounds);
     g.setColour(juce::Colour(0xff333333));
@@ -420,81 +443,94 @@ void GabbermasterAudioProcessorEditor::paint (juce::Graphics& g)
         g.strokePath(envPath, juce::PathStrokeType(6.0f));
     }
 
-    // Knob labels
+    // Knob labels - responsive
     g.setColour(juce::Colours::white);
-    g.setFont(juce::FontOptions(11.0f));
+    float labelFontSize = 11.0f * juce::jmin(scaleX, scaleY);
+    g.setFont(juce::FontOptions(labelFontSize));
 
-    // Row 1 labels
-    int row1LabelY = 150;
-    int knobSize = 55;
-    g.drawText("Attack", 15, row1LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Decay", 75, row1LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Release", 135, row1LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Sustain", 195, row1LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Volume", 255, row1LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Pre", 340, row1LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Post", 405, row1LabelY, knobSize, 14, juce::Justification::centred);
+    // Row 1 labels - responsive
+    int row1LabelY = static_cast<int>(220 * scaleY);
+    int knobSize = static_cast<int>(65 * juce::jmin(scaleX, scaleY));
+    int knobSpacing = static_cast<int>(90 * scaleX);
+    int leftX = static_cast<int>(20 * scaleX);
+    g.drawText("Attack", leftX, row1LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Decay", leftX + knobSpacing, row1LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Release", leftX + knobSpacing * 2, row1LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Sustain", leftX + knobSpacing * 3, row1LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Volume", leftX + knobSpacing * 4, row1LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Pre", leftX + knobSpacing * 5, row1LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Post", leftX + knobSpacing * 6, row1LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
 
-    // Row 2 labels
-    int row2LabelY = 225;
-    g.drawText("Cutoff", 15, row2LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Q", 75, row2LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Track", 135, row2LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Env", 195, row2LabelY, knobSize, 14, juce::Justification::centred);
+    // Row 2 labels - responsive
+    int row2LabelY = static_cast<int>(300 * scaleY);
+    g.drawText("Cutoff", leftX, row2LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Q", leftX + knobSpacing, row2LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Track", leftX + knobSpacing * 2, row2LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Env", leftX + knobSpacing * 3, row2LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
 
-    // Row 3 labels
-    int row3LabelY = 300;
-    g.drawText("Room", 15, row3LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Width", 75, row3LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Damp", 135, row3LabelY, knobSize, 14, juce::Justification::centred);
-    g.drawText("Mix", 195, row3LabelY, knobSize, 14, juce::Justification::centred);
+    // Row 3 labels - responsive
+    int row3LabelY = static_cast<int>(400 * scaleY);
+    g.drawText("Room", leftX, row3LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Width", leftX + knobSpacing, row3LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Damp", leftX + knobSpacing * 2, row3LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Mix", leftX + knobSpacing * 3, row3LabelY, knobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    
+    // Filter type selector label - responsive
+    int filterX = static_cast<int>(680 * scaleX);
+    g.drawText("Filter", filterX, static_cast<int>(330 * scaleY), static_cast<int>(80 * scaleX), static_cast<int>(18 * scaleY), juce::Justification::centred);
+    
+    // Pre/Post selector label - responsive
+    g.drawText("Pre/Post", filterX, static_cast<int>(410 * scaleY), static_cast<int>(80 * scaleX), static_cast<int>(18 * scaleY), juce::Justification::centred);
 
-    // OFF/ON labels under Width/Damp
-    g.setFont(juce::FontOptions(9.0f));
-    g.drawText("OFF", 75, row3LabelY + 14, knobSize, 12, juce::Justification::centred);
-    g.drawText("ON", 135, row3LabelY + 14, knobSize, 12, juce::Justification::centred);
+    // OFF/ON labels under Width/Damp - responsive
+    g.setFont(juce::FontOptions(10.0f * juce::jmin(scaleX, scaleY)));
+    g.drawText("OFF", leftX + knobSpacing, row3LabelY + static_cast<int>(16 * scaleY), knobSize, static_cast<int>(14 * scaleY), juce::Justification::centred);
+    g.drawText("ON", leftX + knobSpacing * 2, row3LabelY + static_cast<int>(16 * scaleY), knobSize, static_cast<int>(14 * scaleY), juce::Justification::centred);
 
-    // EQ Section label
+    // EQ Section label - responsive
     g.setColour(juce::Colour(0xffcc0000));
-    g.setFont(juce::FontOptions(14.0f, juce::Font::bold));
-    g.drawText("EQ CURVE", 360, 300, 100, 18, juce::Justification::left);
+    g.setFont(juce::FontOptions(18.0f * juce::jmin(scaleX, scaleY), juce::Font::bold));
+    g.drawText("EQ CURVE", static_cast<int>(900 * scaleX), static_cast<int>(490 * scaleY), 
+               static_cast<int>(150 * scaleX), static_cast<int>(24 * scaleY), juce::Justification::left);
 
-    // Layer controls section
+    // Layer controls section - responsive
     g.setColour(juce::Colour(0xffcc0000));
-    g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-    g.drawText("LAYERS", 15, 360, 80, 16, juce::Justification::left);
+    g.setFont(juce::FontOptions(16.0f * juce::jmin(scaleX, scaleY), juce::Font::bold));
+    g.drawText("LAYERS", leftX, static_cast<int>(540 * scaleY), static_cast<int>(120 * scaleX), static_cast<int>(20 * scaleY), juce::Justification::left);
 
-    // Layer section labels
+    // Layer section labels - responsive
     g.setColour(juce::Colours::white);
-    g.setFont(juce::FontOptions(10.0f));
+    g.setFont(juce::FontOptions(10.0f * juce::jmin(scaleX, scaleY)));
 
-    int layerY = 380;
-    int layerKnobSize = 45;
-    int layerSpacing = 52;
+    int layerY = static_cast<int>(550 * scaleY);
+    int layerKnobSize = static_cast<int>(55 * juce::jmin(scaleX, scaleY));
+    int layerSpacing = static_cast<int>(75 * scaleX);
+    int clickX = static_cast<int>(320 * scaleX);
 
-    // Sub layer labels
+    // Sub layer labels - responsive
     g.setColour(juce::Colour(0xff00cc00)); // Green for sub
-    g.drawText("SUB", 15, layerY - 14, 50, 12, juce::Justification::left);
+    g.drawText("SUB", leftX, layerY - static_cast<int>(20 * scaleY), static_cast<int>(70 * scaleX), static_cast<int>(18 * scaleY), juce::Justification::left);
     g.setColour(juce::Colours::white);
-    g.drawText("Vol", 15, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
-    g.drawText("Pitch", 15 + layerSpacing, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
-    g.drawText("Decay", 15 + layerSpacing * 2, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Vol", leftX, layerY + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Pitch", leftX + layerSpacing, layerY + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Decay", leftX + layerSpacing * 2, layerY + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
 
-    // Body layer labels
+    // Body layer labels - responsive
     g.setColour(juce::Colour(0xffcccc00)); // Yellow for body
-    g.drawText("BODY", 15, layerY + 70 - 14, 50, 12, juce::Justification::left);
+    int bodyOffset = static_cast<int>(100 * scaleY);
+    g.drawText("BODY", leftX, layerY + bodyOffset - static_cast<int>(20 * scaleY), static_cast<int>(70 * scaleX), static_cast<int>(18 * scaleY), juce::Justification::left);
     g.setColour(juce::Colours::white);
-    g.drawText("Vol", 15, layerY + 70 + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
-    g.drawText("Pitch", 15 + layerSpacing, layerY + 70 + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
-    g.drawText("Decay", 15 + layerSpacing * 2, layerY + 70 + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Vol", leftX, layerY + bodyOffset + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Pitch", leftX + layerSpacing, layerY + bodyOffset + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Decay", leftX + layerSpacing * 2, layerY + bodyOffset + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
 
-    // Click layer labels
+    // Click layer labels - responsive
     g.setColour(juce::Colour(0xffcc6600)); // Orange for click
-    g.drawText("CLICK", 185, layerY - 14, 50, 12, juce::Justification::left);
+    g.drawText("CLICK", clickX, layerY - static_cast<int>(20 * scaleY), static_cast<int>(70 * scaleX), static_cast<int>(18 * scaleY), juce::Justification::left);
     g.setColour(juce::Colours::white);
-    g.drawText("Vol", 185, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
-    g.drawText("Pitch", 185 + layerSpacing, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
-    g.drawText("Decay", 185 + layerSpacing * 2, layerY + layerKnobSize, layerKnobSize, 12, juce::Justification::centred);
+    g.drawText("Vol", clickX, layerY + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Pitch", clickX + layerSpacing, layerY + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
+    g.drawText("Decay", clickX + layerSpacing * 2, layerY + layerKnobSize, layerKnobSize, static_cast<int>(16 * scaleY), juce::Justification::centred);
 
     // Website watermark
     g.setColour(juce::Colour(0xffcc0000));
@@ -504,90 +540,115 @@ void GabbermasterAudioProcessorEditor::paint (juce::Graphics& g)
 
 void GabbermasterAudioProcessorEditor::resized()
 {
-    // GO! button (top right)
-    goButton.setBounds(690, 12, 50, 28);
+    auto bounds = getLocalBounds();
+    int width = bounds.getWidth();
+    int height = bounds.getHeight();
+    
+    // Scale factors based on default size (1400x900)
+    float scaleX = width / 1400.0f;
+    float scaleY = height / 900.0f;
+    
+    // GO! button (top right) - responsive
+    goButton.setBounds(static_cast<int>(1200 * scaleX), static_cast<int>(20 * scaleY), 
+                       static_cast<int>(80 * scaleX), static_cast<int>(35 * scaleY));
 
-    // Right side controls
-    presetSelector.setBounds(570, 12, 110, 24);
-    sampleNumberLabel.setBounds(570, 42, 50, 22);
-    sampleNameField.setBounds(625, 42, 115, 22);
-    fileButton.setBounds(570, 70, 60, 24);
+    // Right side controls - responsive, positioned below title
+    int rightX = static_cast<int>(900 * scaleX);
+    presetSelector.setBounds(rightX, static_cast<int>(70 * scaleY), 
+                            static_cast<int>(150 * scaleX), static_cast<int>(30 * scaleY));
+    sampleNumberLabel.setBounds(rightX, static_cast<int>(110 * scaleY), 
+                                static_cast<int>(70 * scaleX), static_cast<int>(28 * scaleY));
+    sampleNameField.setBounds(static_cast<int>(980 * scaleX), static_cast<int>(110 * scaleY), 
+                              static_cast<int>(150 * scaleX), static_cast<int>(28 * scaleY));
+    fileButton.setBounds(rightX, static_cast<int>(150 * scaleY), 
+                        static_cast<int>(80 * scaleX), static_cast<int>(30 * scaleY));
 
-    // Filter type selector (HI dropdown)
-    filterTypeSelector.setBounds(270, 170, 55, 22);
+    // Filter type selector - responsive
+    int filterX = static_cast<int>(680 * scaleX);
+    filterTypeSelector.setBounds(filterX, static_cast<int>(350 * scaleY), 
+                                static_cast<int>(80 * scaleX), static_cast<int>(30 * scaleY));
+    
+    // Pre/Post distortion selector - responsive
+    distPositionSelector.setBounds(filterX, static_cast<int>(430 * scaleY), 
+                                  static_cast<int>(80 * scaleX), static_cast<int>(30 * scaleY));
 
-    // Knob layout
-    int knobSize = 55;
+    // Knob layout - responsive
+    int knobSize = static_cast<int>(65 * juce::jmin(scaleX, scaleY));
+    int leftX = static_cast<int>(20 * scaleX);
+    int knobSpacing = static_cast<int>(90 * scaleX);
 
-    // Row 1 - 5 envelope knobs + 2 pre/post knobs
-    int row1Y = 90;
-    attackKnob.setBounds(15, row1Y, knobSize, knobSize);
-    decayKnob.setBounds(75, row1Y, knobSize, knobSize);
-    releaseKnob.setBounds(135, row1Y, knobSize, knobSize);
-    sustainKnob.setBounds(195, row1Y, knobSize, knobSize);
-    volumeKnob.setBounds(255, row1Y, knobSize, knobSize);
+    // Row 1 - Envelope knobs + Pre/Post knobs
+    int row1Y = static_cast<int>(130 * scaleY);
+    attackKnob.setBounds(leftX, row1Y, knobSize, knobSize);
+    decayKnob.setBounds(leftX + knobSpacing, row1Y, knobSize, knobSize);
+    releaseKnob.setBounds(leftX + knobSpacing * 2, row1Y, knobSize, knobSize);
+    sustainKnob.setBounds(leftX + knobSpacing * 3, row1Y, knobSize, knobSize);
+    volumeKnob.setBounds(leftX + knobSpacing * 4, row1Y, knobSize, knobSize);
+    preKnob.setBounds(leftX + knobSpacing * 5, row1Y, knobSize, knobSize);
+    postKnob.setBounds(leftX + knobSpacing * 6, row1Y, knobSize, knobSize);
 
-    preKnob.setBounds(340, row1Y, knobSize, knobSize);
-    postKnob.setBounds(405, row1Y, knobSize, knobSize);
+    // Row 2 - Filter knobs
+    int row2Y = static_cast<int>(230 * scaleY);
+    cutoffKnob.setBounds(leftX, row2Y, knobSize, knobSize);
+    qKnob.setBounds(leftX + knobSpacing, row2Y, knobSize, knobSize);
+    trackKnob.setBounds(leftX + knobSpacing * 2, row2Y, knobSize, knobSize);
+    envKnob.setBounds(leftX + knobSpacing * 3, row2Y, knobSize, knobSize);
 
-    // Row 2 - 4 filter knobs
-    int row2Y = 165;
-    cutoffKnob.setBounds(15, row2Y, knobSize, knobSize);
-    qKnob.setBounds(75, row2Y, knobSize, knobSize);
-    trackKnob.setBounds(135, row2Y, knobSize, knobSize);
-    envKnob.setBounds(195, row2Y, knobSize, knobSize);
+    // Row 3 - Effect knobs
+    int row3Y = static_cast<int>(330 * scaleY);
+    roomKnob.setBounds(leftX, row3Y, knobSize, knobSize);
+    widthKnob.setBounds(leftX + knobSpacing, row3Y, knobSize, knobSize);
+    dampKnob.setBounds(leftX + knobSpacing * 2, row3Y, knobSize, knobSize);
+    mixKnob.setBounds(leftX + knobSpacing * 3, row3Y, knobSize, knobSize);
 
-    // Row 3 - 4 effect knobs
-    int row3Y = 240;
-    roomKnob.setBounds(15, row3Y, knobSize, knobSize);
-    widthKnob.setBounds(75, row3Y, knobSize, knobSize);
-    dampKnob.setBounds(135, row3Y, knobSize, knobSize);
-    mixKnob.setBounds(195, row3Y, knobSize, knobSize);
+    // SLOW/FAST radio buttons - responsive
+    int bottomY = static_cast<int>(780 * scaleY);
+    slowButton.setBounds(leftX, bottomY, static_cast<int>(90 * scaleX), static_cast<int>(32 * scaleY));
+    fastButton.setBounds(static_cast<int>(120 * scaleX), bottomY, static_cast<int>(90 * scaleX), static_cast<int>(32 * scaleY));
 
-    // SLOW/FAST radio buttons
-    slowButton.setBounds(15, 540, 70, 24);
-    fastButton.setBounds(90, 540, 70, 24);
+    // OFF/ON toggle buttons - responsive
+    offButton.setBounds(static_cast<int>(230 * scaleX), bottomY, static_cast<int>(80 * scaleX), static_cast<int>(32 * scaleY));
+    onButton.setBounds(static_cast<int>(320 * scaleX), bottomY, static_cast<int>(80 * scaleX), static_cast<int>(32 * scaleY));
 
-    // OFF/ON toggle buttons
-    offButton.setBounds(180, 540, 60, 24);
-    onButton.setBounds(250, 540, 60, 24);
-
-    // Kick mode buttons (top row, after title)
-    int kickModeY = 75;
-    int kickModeX = 550;
-    int kickBtnWidth = 55;
-    int kickBtnHeight = 20;
-    int kickBtnSpacing = 4;
+    // Kick mode buttons - responsive
+    int kickModeY = static_cast<int>(225 * scaleY);
+    int kickModeX = rightX;
+    int kickBtnWidth = static_cast<int>(80 * scaleX);
+    int kickBtnHeight = static_cast<int>(30 * scaleY);
+    int kickBtnSpacing = static_cast<int>(15 * scaleX);
     viperButton.setBounds(kickModeX, kickModeY, kickBtnWidth, kickBtnHeight);
     evilButton.setBounds(kickModeX + kickBtnWidth + kickBtnSpacing, kickModeY, kickBtnWidth, kickBtnHeight);
     hardButton.setBounds(kickModeX + (kickBtnWidth + kickBtnSpacing) * 2, kickModeY, kickBtnWidth, kickBtnHeight);
-    softButton.setBounds(kickModeX, kickModeY + kickBtnHeight + 3, kickBtnWidth, kickBtnHeight);
-    rawButton.setBounds(kickModeX + kickBtnWidth + kickBtnSpacing, kickModeY + kickBtnHeight + 3, kickBtnWidth, kickBtnHeight);
-    metalButton.setBounds(kickModeX + (kickBtnWidth + kickBtnSpacing) * 2, kickModeY + kickBtnHeight + 3, kickBtnWidth, kickBtnHeight);
+    softButton.setBounds(kickModeX, kickModeY + kickBtnHeight + static_cast<int>(10 * scaleY), kickBtnWidth, kickBtnHeight);
+    rawButton.setBounds(kickModeX + kickBtnWidth + kickBtnSpacing, kickModeY + kickBtnHeight + static_cast<int>(10 * scaleY), kickBtnWidth, kickBtnHeight);
+    metalButton.setBounds(kickModeX + (kickBtnWidth + kickBtnSpacing) * 2, kickModeY + kickBtnHeight + static_cast<int>(10 * scaleY), kickBtnWidth, kickBtnHeight);
 
-    // EQ Curve display (right side, large)
+    // EQ Curve display - responsive
     if (eqCurve != nullptr)
-        eqCurve->setBounds(360, 320, 475, 140);
+        eqCurve->setBounds(rightX, static_cast<int>(520 * scaleY), 
+                          static_cast<int>(480 * scaleX), static_cast<int>(200 * scaleY));
 
-    // Layer controls section (bottom left)
-    int layerY = 380;
-    int layerKnobSize = 45;
-    int layerSpacing = 52;
+    // Layer controls section - responsive
+    int layerY = static_cast<int>(560 * scaleY);
+    int layerKnobSize = static_cast<int>(55 * juce::jmin(scaleX, scaleY));
+    int layerSpacing = static_cast<int>(75 * scaleX);
+    int clickX = static_cast<int>(320 * scaleX);
 
     // Sub layer
-    subVolKnob.setBounds(15, layerY, layerKnobSize, layerKnobSize);
-    subPitchKnob.setBounds(15 + layerSpacing, layerY, layerKnobSize, layerKnobSize);
-    subDecayKnob.setBounds(15 + layerSpacing * 2, layerY, layerKnobSize, layerKnobSize);
+    subVolKnob.setBounds(leftX, layerY, layerKnobSize, layerKnobSize);
+    subPitchKnob.setBounds(leftX + layerSpacing, layerY, layerKnobSize, layerKnobSize);
+    subDecayKnob.setBounds(leftX + layerSpacing * 2, layerY, layerKnobSize, layerKnobSize);
 
     // Body layer
-    bodyVolKnob.setBounds(15, layerY + 70, layerKnobSize, layerKnobSize);
-    bodyPitchKnob.setBounds(15 + layerSpacing, layerY + 70, layerKnobSize, layerKnobSize);
-    bodyDecayKnob.setBounds(15 + layerSpacing * 2, layerY + 70, layerKnobSize, layerKnobSize);
+    int bodyOffset = static_cast<int>(100 * scaleY);
+    bodyVolKnob.setBounds(leftX, layerY + bodyOffset, layerKnobSize, layerKnobSize);
+    bodyPitchKnob.setBounds(leftX + layerSpacing, layerY + bodyOffset, layerKnobSize, layerKnobSize);
+    bodyDecayKnob.setBounds(leftX + layerSpacing * 2, layerY + bodyOffset, layerKnobSize, layerKnobSize);
 
     // Click layer
-    clickVolKnob.setBounds(185, layerY, layerKnobSize, layerKnobSize);
-    clickPitchKnob.setBounds(185 + layerSpacing, layerY, layerKnobSize, layerKnobSize);
-    clickDecayKnob.setBounds(185 + layerSpacing * 2, layerY, layerKnobSize, layerKnobSize);
+    clickVolKnob.setBounds(clickX, layerY, layerKnobSize, layerKnobSize);
+    clickPitchKnob.setBounds(clickX + layerSpacing, layerY, layerKnobSize, layerKnobSize);
+    clickDecayKnob.setBounds(clickX + layerSpacing * 2, layerY, layerKnobSize, layerKnobSize);
 }
 
 void GabbermasterAudioProcessorEditor::timerCallback()
