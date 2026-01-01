@@ -1,16 +1,9 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "SampleManager.h"
-#include "DSP/Distortion.h"
-#include "DSP/Filter.h"
-#include "DSP/Reverb.h"
-#include "DSP/EQ.h"
-#include "DSP/LayerProcessor.h"
 
 //==============================================================================
-class GabbermasterAudioProcessor : public juce::AudioProcessor,
-                                   public juce::ValueTree::Listener
+class GabbermasterAudioProcessor : public juce::AudioProcessor
 {
 public:
     //==============================================================================
@@ -34,9 +27,10 @@ public:
     //==============================================================================
     const juce::String getName() const override;
 
-    bool acceptsMidi() const override;
-    bool producesMidi() const override;
-    bool isMidiEffect() const override;
+    // CRITICAL: These MUST return correct values for synth/MIDI
+    bool acceptsMidi() const override { return true; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override;
 
     //==============================================================================
@@ -51,105 +45,103 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     //==============================================================================
-    // Parameter access
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
-    SampleManager& getSampleManager() { return sampleManager; }
 
-    // Load custom sample
-    void loadCustomSample(const juce::File& file);
-
-    // For UI access
-    float getEnvelopeValue() const { return currentEnvelopeValue.load(); }
-    int getCurrentFilterType() const { return currentFilterType.load(); }
-    bool isSlowMode() const { return slowMode.load(); }
-    bool isEffectsBypassed() const { return effectsBypassed.load(); }
-
-    void setFilterType(int type) { currentFilterType.store(type); }
-    void setSlowMode(bool slow) { slowMode.store(slow); }
-    void setEffectsBypassed(bool bypassed) { effectsBypassed.store(bypassed); }
-
-    // EQ access for UI drawing
-    ParametricEQ& getEQ() { return parametricEQ; }
-    const ParametricEQ& getEQ() const { return parametricEQ; }
-
-    // Layer levels for UI
-    float getSubLevel() const { return subLevel.load(); }
-    float getBodyLevel() const { return bodyLevel.load(); }
-    float getClickLevel() const { return clickLevel.load(); }
+    // Trigger a kick from GUI (GO button)
+    void triggerKick(int noteNumber = 48, float velocity = 1.0f);
 
 private:
     //==============================================================================
-    // Audio Processing State Tree
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // Sample playback
-    SampleManager sampleManager;
-    juce::AudioFormatManager formatManager;
-
-    // DSP Effects
-    Distortion distortion;
-    Filter filter;
-    Reverb reverb;
-    ParametricEQ parametricEQ;
-    LayerProcessor layerProcessor;
-
-    // ADSR Envelope
-    juce::ADSR adsr;
-    juce::ADSR::Parameters adsrParams;
-
-    // Voice management
+    // Voice structure for kick synthesis
     struct Voice
     {
         bool isActive = false;
         int noteNumber = -1;
         float velocity = 0.0f;
-        int samplePosition = 0;
+        float phase = 0.0f;
+        float clickPhase = 0.0f;
+        float currentFreq = 50.0f;
+        float targetFreq = 23.2f;
+        float startFreq = 164.0f;
+
+        // Envelope state
+        float envLevel = 0.0f;
+        float clickEnvLevel = 0.0f;
+        int samplesSinceNoteOn = 0;
+
+        // Per-voice timing (calculated at note-on based on MIDI note)
+        float attackTau = 0.008f;       // Attack time constant
+        float decayTau = 0.200f;        // Decay time constant
+        float pitchDecayTau = 0.00676f; // Pitch sweep time constant
+        float clickDecayTau = 0.001f;   // Click transient decay
+
+        // Sample-based pitch ratio (for scaling click freq, etc.)
         float pitchRatio = 1.0f;
-        float pitchEnvValue = 0.0f;
-        juce::ADSR envelope;
-        juce::ADSR pitchEnvelope;
+
+        // Max duration in samples (to prevent infinite voices)
+        int maxDurationSamples = 88200; // 2 seconds at 44.1kHz
 
         void reset()
         {
             isActive = false;
             noteNumber = -1;
             velocity = 0.0f;
-            samplePosition = 0;
+            phase = 0.0f;
+            clickPhase = 0.0f;
+            currentFreq = 50.0f;
+            targetFreq = 23.2f;
+            startFreq = 164.0f;
+            envLevel = 0.0f;
+            clickEnvLevel = 0.0f;
+            samplesSinceNoteOn = 0;
+            attackTau = 0.008f;
+            decayTau = 0.200f;
+            pitchDecayTau = 0.00676f;
+            clickDecayTau = 0.001f;
             pitchRatio = 1.0f;
-            pitchEnvValue = 0.0f;
-            envelope.reset();
-            pitchEnvelope.reset();
+            maxDurationSamples = 88200;
         }
     };
 
-    static constexpr int maxVoices = 16;
+    static constexpr int maxVoices = 8;
     std::array<Voice, maxVoices> voices;
 
-    // Processing
+    // Processing state
     double currentSampleRate = 44100.0;
 
-    // Parameter smoothing
-    juce::SmoothedValue<float> driveSmoothed;
-    juce::SmoothedValue<float> outputGainSmoothed;
-    juce::SmoothedValue<float> mixSmoothed;
+    // Filter state (stereo)
+    float filterState1L = 0.0f;
+    float filterState2L = 0.0f;
+    float filterState1R = 0.0f;
+    float filterState2R = 0.0f;
 
-    // State for UI
-    std::atomic<float> currentEnvelopeValue{0.0f};
-    std::atomic<int> currentFilterType{1}; // 0=HP, 1=LP, 2=BP
-    std::atomic<bool> slowMode{false};
-    std::atomic<bool> effectsBypassed{false};
+    // Post-synth LPF state
+    float postLpfStateL = 0.0f;
+    float postLpfStateR = 0.0f;
 
-    // Layer level metering (for UI visualization)
-    std::atomic<float> subLevel{0.0f};
-    std::atomic<float> bodyLevel{0.0f};
-    std::atomic<float> clickLevel{0.0f};
+    // Debug timing
+    int64_t lastNoMidiLogTime = 0;
+
+    // Reference note for pitch calculations
+    static constexpr int referenceNote = 48; // C3
+
+    // Neutral track position
+    static constexpr float neutralTrack = 0.0625f;
 
     // Helper methods
-    void handleMidiEvent(const juce::MidiMessage& message);
-    void renderVoices(juce::AudioBuffer<float>& buffer, int numSamples);
-    Voice* findFreeVoice();
-    Voice* findVoiceForNote(int noteNumber);
+    void startVoice(int noteNumber, float velocity);
+    void stopVoice(int noteNumber);
+    void renderVoices(juce::AudioBuffer<float>& buffer);
+    float processFilter(float input, float cutoffNorm, int filterType, float Q,
+                        float envAmount, float envLevel, bool bypass, bool isLeft);
+    float processPostLPF(float input, float cutoffHz, bool isLeft);
+
+    // Internal engine constants for each kick mode (NOT parameters)
+    void getKickModeParams(int mode, float& startPitchHz, float& endPitchHz,
+                           float& pitchDecayMs, float& clickFreq, float& clickAmp);
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GabbermasterAudioProcessor)
